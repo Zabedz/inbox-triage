@@ -1,0 +1,18 @@
+description: "match: correct tracker row"
+
+prompts:
+  - "{{body}}"
+
+providers:
+  - python:../providers/graph_provider.py:
+      id: jev
+      config:
+        task: match
+        model: jev
+
+tests: ../datasets/synthetic.promptfoo.jsonl
+
+defaultTest:
+  assert:
+    - type: python
+      value: file://../assertions.py:match_assert

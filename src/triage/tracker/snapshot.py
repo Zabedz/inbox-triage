@@ -27,7 +27,8 @@ CREATE TABLE IF NOT EXISTS applications (
     pdf TEXT NOT NULL,
     report TEXT NOT NULL,
     notes TEXT NOT NULL,
-    url TEXT NOT NULL
+    url TEXT NOT NULL,
+    requisition_id TEXT NOT NULL DEFAULT ''
 )
 """
 
@@ -64,7 +65,7 @@ def copy_snapshot(source: Path, dest: Path) -> Path:
 def _write_applications(conn: sqlite3.Connection, apps: list[Application]) -> None:
     conn.execute("DELETE FROM applications")
     conn.executemany(
-        "INSERT INTO applications VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO applications VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
         [
             (
                 a.id,
@@ -79,6 +80,7 @@ def _write_applications(conn: sqlite3.Connection, apps: list[Application]) -> No
                 a.report,
                 a.notes,
                 a.url,
+                a.requisition_id,
             )
             for a in apps
         ],
@@ -124,6 +126,7 @@ def load_into_sqlite(
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
     try:
+        conn.execute("DROP TABLE IF EXISTS applications")
         conn.execute(APPLICATIONS_DDL)
         conn.execute(STATUS_LOG_DDL)
         conn.execute(ACTIVE_INTERVIEWS_DDL)

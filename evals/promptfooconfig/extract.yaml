@@ -1,0 +1,18 @@
+description: "extract: field accuracy"
+
+prompts:
+  - "{{body}}"
+
+providers:
+  - python:../providers/graph_provider.py:
+      id: llm
+      config:
+        task: extract
+        model: llm
+
+tests: ../datasets/synthetic.promptfoo.jsonl
+
+defaultTest:
+  assert:
+    - type: python
+      value: file://../assertions.py

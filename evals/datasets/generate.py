@@ -6,6 +6,7 @@ the template values, so the labels are never guessed. Deterministic for a seed.
 
 from __future__ import annotations
 
+import json
 import random
 from pathlib import Path
 from typing import TypedDict
@@ -20,16 +21,59 @@ class TrackerRow(TypedDict):
     role: str
     req: str
     via: str
+    date_applied: str
 
 
 # Synthetic tracker. matched_tracker_id in each email references a row here.
 TRACKER: list[TrackerRow] = [
-    {"id": 1, "company": "Acme Corp", "role": "AI Engineer", "req": "AC-1001", "via": ""},
-    {"id": 2, "company": "Globex", "role": "Software Engineer", "req": "GL-2001", "via": ""},
-    {"id": 3, "company": "Initech", "role": "Data Scientist", "req": "IN-3001", "via": ""},
-    {"id": 4, "company": "Acme Corp", "role": "AI Engineer", "req": "AC-1002", "via": ""},
-    {"id": 5, "company": "Umbrella", "role": "Machine Learning Engineer", "req": "UM-4001", "via": ""},  # noqa: E501
-    {"id": 6, "company": "Hooli", "role": "AI Engineer", "req": "HO-5001", "via": "TalentBridge"},
+    {
+        "id": 1,
+        "company": "Acme Corp",
+        "role": "AI Engineer",
+        "req": "AC-1001",
+        "via": "",
+        "date_applied": "2026-07-05",
+    },
+    {
+        "id": 2,
+        "company": "Globex",
+        "role": "Software Engineer",
+        "req": "GL-2001",
+        "via": "",
+        "date_applied": "2026-07-06",
+    },
+    {
+        "id": 3,
+        "company": "Initech",
+        "role": "Data Scientist",
+        "req": "IN-3001",
+        "via": "",
+        "date_applied": "2026-07-07",
+    },
+    {
+        "id": 4,
+        "company": "Acme Corp",
+        "role": "AI Engineer",
+        "req": "AC-1002",
+        "via": "",
+        "date_applied": "2026-08-01",
+    },
+    {
+        "id": 5,
+        "company": "Umbrella",
+        "role": "Machine Learning Engineer",
+        "req": "UM-4001",
+        "via": "",
+        "date_applied": "2026-08-02",
+    },
+    {
+        "id": 6,
+        "company": "Hooli",
+        "role": "AI Engineer",
+        "req": "HO-5001",
+        "via": "TalentBridge",
+        "date_applied": "2026-08-03",
+    },
 ]
 
 RECRUITERS = ["Alex Morgan", "Sam Rivera", "Priya Patel"]
@@ -320,6 +364,7 @@ def generate(out: str | Path, seed: int = 0, n_per_category: int = 10) -> int:
     with out.open("w") as fh:
         for record in records:
             fh.write(record.model_dump_json() + "\n")
+    out.with_name("synthetic_tracker.json").write_text(json.dumps(TRACKER, indent=2))
     return len(records)
 
 

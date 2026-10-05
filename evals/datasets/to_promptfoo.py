@@ -16,6 +16,8 @@ def convert(src: str | Path, dst: str | Path) -> int:
             if not line.strip():
                 continue
             record = json.loads(line)
+            matched = record["matched_tracker_id"]
+            action = record["action"]
             out.write(
                 json.dumps(
                     {
@@ -25,6 +27,9 @@ def convert(src: str | Path, dst: str | Path) -> int:
                             "subject": record["subject"],
                             "body": record["body"],
                             "category": record["category"],
+                            "extracted": record["extracted"],
+                            "matched_tracker_id": str(matched) if matched is not None else "none",
+                            "action": action or "none",
                         },
                         "description": record["email_id"],
                     }

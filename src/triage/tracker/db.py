@@ -23,6 +23,7 @@ def _row_to_application(row: sqlite3.Row) -> Application:
         report=row["report"],
         notes=row["notes"],
         url=row["url"],
+        requisition_id=row["requisition_id"],
     )
 
 
@@ -40,6 +41,31 @@ class TrackerDB:
             "SELECT * FROM applications WHERE company LIKE ? OR role LIKE ? LIMIT ?",
             (like, like, limit),
         )
+        return [_row_to_application(r) for r in cur.fetchall()]
+
+    def search_tracker(
+        self, company: str = "", role: str = "", limit: int = 10
+    ) -> list[Application]:
+        company = company.strip().lower()
+        role = role.strip().lower()
+        if company and role:
+            cur = self._conn.execute(
+                "SELECT * FROM applications "
+                "WHERE lower(company) LIKE ? AND lower(role) LIKE ? LIMIT ?",
+                (f"%{company}%", f"%{role}%", limit),
+            )
+        elif company:
+            cur = self._conn.execute(
+                "SELECT * FROM applications WHERE lower(company) LIKE ? LIMIT ?",
+                (f"%{company}%", limit),
+            )
+        elif role:
+            cur = self._conn.execute(
+                "SELECT * FROM applications WHERE lower(role) LIKE ? LIMIT ?",
+                (f"%{role}%", limit),
+            )
+        else:
+            cur = self._conn.execute("SELECT * FROM applications LIMIT ?", (limit,))
         return [_row_to_application(r) for r in cur.fetchall()]
 
     def get(self, tracker_id: int) -> Application | None:

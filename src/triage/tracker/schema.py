@@ -20,6 +20,7 @@ class Application(BaseModel):
     report: str
     notes: str
     url: str
+    requisition_id: str = ""
 
 
 class StatusLogRow(BaseModel):

@@ -11,9 +11,10 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import RetryPolicy, interrupt
 
 from triage.graph.nodes.classify import build_classify
+from triage.graph.nodes.extract import build_extract
 from triage.graph.state import State
 from triage.guard import Action, GuardError, GuardThresholds, decide
-from triage.models.base import DecisionModel
+from triage.models.base import DecisionModel, GenerativeModel
 from triage.redact import redact as redact_text
 
 logger = logging.getLogger("triage.graph")
@@ -132,6 +133,8 @@ def build_graph(
     checkpointer: SqliteSaver | None = None,
     redact_names: Sequence[str] = (),
     decision_model: DecisionModel | None = None,
+    extract_model: GenerativeModel | None = None,
+    match_node: Callable[[State], dict[str, Any]] | None = None,
 ) -> Any:
     thresholds = thresholds or GuardThresholds()
     overrides = nodes or {}
@@ -142,6 +145,10 @@ def build_graph(
     classify_node: Callable[[State], dict[str, Any]] = classify
     if decision_model is not None:
         classify_node = build_classify(decision_model)
+
+    extract_node: Callable[[State], dict[str, Any]] = extract
+    if extract_model is not None:
+        extract_node = build_extract(extract_model)
 
     graph = StateGraph(State)
 
@@ -155,8 +162,8 @@ def build_graph(
     add("fetch_context", overrides.get("fetch_context", fetch_context))
     add("redact", overrides.get("redact", _redact))
     add("classify", overrides.get("classify", classify_node))
-    add("extract", overrides.get("extract", extract))
-    add("match", overrides.get("match", match))
+    add("extract", overrides.get("extract", extract_node))
+    add("match", overrides.get("match", match_node or match))
     add("propose_action", overrides.get("propose_action", propose_action))
     add("guard", overrides.get("guard", lambda s: guard(s, thresholds)))
     add("apply", overrides.get("apply", apply))

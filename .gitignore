@@ -9,6 +9,7 @@ gmail-token.json
 *.token.json
 
 # generated synthetic datasets (regenerate with evals/datasets/generate.py)
+evals/datasets/*.json
 evals/datasets/*.jsonl
 evals/results/
 
