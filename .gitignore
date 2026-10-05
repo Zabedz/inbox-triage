@@ -1,0 +1,23 @@
+# secrets and local data
+.env
+data/
+*.db
+*.sqlite
+*.sqlite3
+client_secrets.json
+gmail-token.json
+*.token.json
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+
+# tooling
+.idea/
+.venv/

@@ -1,0 +1,18 @@
+{
+  "model": "jev-1.13",
+  "answers": {
+    "category": {
+      "type": "choice",
+      "choice": "rejection",
+      "confidence": 1.0,
+      "probabilities": {"rejection": 1.0, "interview_invite": 0.0, "other": 0.0}
+    },
+    "needs_reply": {
+      "type": "choice",
+      "choice": "no",
+      "confidence": 0.98,
+      "probabilities": {"yes": 0.02, "no": 0.98}
+    }
+  },
+  "usage": {"input_tokens": 354, "output_tokens": 45}
+}
