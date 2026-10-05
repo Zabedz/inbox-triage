@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -24,7 +24,7 @@ DEFAULT_QUERY = "is:unread newer_than:7d"
 @dataclass(frozen=True)
 class JevConfig:
     endpoint: str
-    api_key: str
+    api_key: str = field(repr=False)
     model: str
     timeout_s: float = 30.0
 
@@ -52,8 +52,11 @@ class Config:
     tracker: TrackerConfig
     gmail: GmailConfig
     llm_provider: str = ""
-    anthropic_model: str = ""
-    anthropic_api_key: str = ""
+    llm_model: str = "claude-haiku-4-5-20251001"
+    anthropic_api_key: str = field(default="", repr=False)
+    zen_base_url: str = "https://opencode.ai/zen/v1"
+    decision_backend: str = "jev"
+    candidate_names: tuple[str, ...] = ()
 
 
 def _path(name: str, default: str) -> Path:
@@ -96,6 +99,13 @@ def load(env_path: str | Path | None = None) -> Config:
         tracker=tracker,
         gmail=gmail,
         llm_provider=os.environ.get("LLM_PROVIDER", ""),
-        anthropic_model=os.environ.get("ANTHROPIC_MODEL", ""),
+        llm_model=os.environ.get("LLM_MODEL", "claude-haiku-4-5-20251001"),
         anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY", ""),
+        zen_base_url=os.environ.get("ZEN_BASE_URL", "https://opencode.ai/zen/v1"),
+        decision_backend=os.environ.get("DECISION_BACKEND", "jev"),
+        candidate_names=tuple(
+            name.strip()
+            for name in os.environ.get("CANDIDATE_NAMES", "").split(",")
+            if name.strip()
+        ),
     )

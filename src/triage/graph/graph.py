@@ -10,8 +10,10 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import RetryPolicy, interrupt
 
+from triage.graph.nodes.classify import build_classify
 from triage.graph.state import State
 from triage.guard import Action, GuardError, GuardThresholds, decide
+from triage.models.base import DecisionModel
 from triage.redact import redact as redact_text
 
 logger = logging.getLogger("triage.graph")
@@ -19,7 +21,7 @@ logger = logging.getLogger("triage.graph")
 RETRYABLE = {"classify", "extract", "match", "propose_action"}
 
 
-def _sender_domain(from_: str) -> str:
+def sender_domain(from_: str) -> str:
     if "@" in from_:
         return from_.rsplit("@", 1)[1].strip("> ")
     return from_
@@ -29,13 +31,16 @@ def fetch_context(state: State) -> dict[str, Any]:
     email = state["email"]
     return {
         "thread_history": [],
-        "sender_domain": _sender_domain(email.from_),
+        "sender_domain": sender_domain(email.from_),
     }
 
 
 def redact(state: State, names: Sequence[str] = ()) -> dict[str, Any]:
     email = state["email"]
-    return {"body_text": redact_text(email.body_plain, names=names).text}
+    return {
+        "body_text": redact_text(email.body_plain, names=names).text,
+        "subject_text": redact_text(email.subject, names=names).text,
+    }
 
 
 def classify(state: State) -> dict[str, Any]:
@@ -126,12 +131,17 @@ def build_graph(
     thresholds: GuardThresholds | None = None,
     checkpointer: SqliteSaver | None = None,
     redact_names: Sequence[str] = (),
+    decision_model: DecisionModel | None = None,
 ) -> Any:
     thresholds = thresholds or GuardThresholds()
     overrides = nodes or {}
 
     def _redact(state: State) -> dict[str, Any]:
         return redact(state, names=redact_names)
+
+    classify_node: Callable[[State], dict[str, Any]] = classify
+    if decision_model is not None:
+        classify_node = build_classify(decision_model)
 
     graph = StateGraph(State)
 
@@ -144,7 +154,7 @@ def build_graph(
 
     add("fetch_context", overrides.get("fetch_context", fetch_context))
     add("redact", overrides.get("redact", _redact))
-    add("classify", overrides.get("classify", classify))
+    add("classify", overrides.get("classify", classify_node))
     add("extract", overrides.get("extract", extract))
     add("match", overrides.get("match", match))
     add("propose_action", overrides.get("propose_action", propose_action))

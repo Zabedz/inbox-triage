@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import TypedDict
 
 from triage.guard import Action
-from triage.labels import CATEGORIES, ExtractedFields, LabeledEmail
+from triage.labels import CATEGORIES, Category, ExtractedFields, LabeledEmail
 
 
 class TrackerRow(TypedDict):
@@ -49,7 +49,7 @@ def _row(company: str, role: str, req: str | None = None) -> TrackerRow:
 
 
 def _email(
-    prefix: str,
+    prefix: Category,
     i: int,
     row: TrackerRow | None,
     from_: str,

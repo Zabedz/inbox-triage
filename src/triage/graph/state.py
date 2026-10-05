@@ -13,6 +13,7 @@ class State(TypedDict, total=False):
     thread_history: list[dict[str, Any]]
     sender_domain: str
     body_text: str
+    subject_text: str
 
     category: str
     category_probs: dict[str, float]

@@ -10,6 +10,7 @@ gmail-token.json
 
 # generated synthetic datasets (regenerate with evals/datasets/generate.py)
 evals/datasets/*.jsonl
+evals/results/
 
 # python
 __pycache__/
@@ -24,3 +25,4 @@ dist/
 # tooling
 .idea/
 .venv/
+node_modules/

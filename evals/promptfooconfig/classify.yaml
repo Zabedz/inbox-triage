@@ -1,0 +1,21 @@
+description: "classify: category accuracy, Jev vs LLM"
+
+prompts:
+  - "{{body}}"
+
+providers:
+  - python:../providers/graph_provider.py:
+      id: jev
+      config:
+        model: jev
+  - python:../providers/graph_provider.py:
+      id: llm
+      config:
+        model: llm
+
+tests: ../datasets/synthetic.promptfoo.jsonl
+
+defaultTest:
+  assert:
+    - type: equals
+      value: "{{category}}"
