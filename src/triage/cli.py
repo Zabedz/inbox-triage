@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable
+from pathlib import Path
 
 from triage.config import load
-from triage.gmail.ingest import ingest
+from triage.gmail.ingest import auth, ingest
+from triage.label_cli import label, load_emails
+from triage.tracker.db import TrackerDB
 from triage.tracker.snapshot import snapshot
 
 
@@ -17,9 +20,27 @@ def _cmd_snapshot(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_auth(args: argparse.Namespace) -> int:
+    cfg = load()
+    auth(cfg)
+    return 0
+
+
 def _cmd_ingest(args: argparse.Namespace) -> int:
     cfg = load()
-    ingest(cfg, dry_run=args.dry_run)
+    ingest(cfg, dry_run=args.dry_run, out=args.out)
+    return 0
+
+
+def _cmd_label(args: argparse.Namespace) -> int:
+    cfg = load()
+    emails = load_emails(args.in_file)
+    tracker = TrackerDB(cfg.tracker.db)
+    try:
+        count = label(emails, tracker, args.out)
+    finally:
+        tracker.close()
+    print(f"labelled {count} emails (total now in {args.out})")
     return 0
 
 
@@ -30,9 +51,18 @@ def build_parser() -> argparse.ArgumentParser:
     snap = sub.add_parser("snapshot", help="copy tracker into local SQLite")
     snap.set_defaults(func=_cmd_snapshot)
 
+    auth_p = sub.add_parser("auth", help="authorise Gmail (read-only)")
+    auth_p.set_defaults(func=_cmd_auth)
+
     ing = sub.add_parser("ingest", help="list/fetch job-related Gmail")
     ing.add_argument("--dry-run", action="store_true", help="print message IDs only")
+    ing.add_argument("--out", type=Path, help="write emails to JSONL")
     ing.set_defaults(func=_cmd_ingest)
+
+    lab = sub.add_parser("label", help="label emails against the tracker")
+    lab.add_argument("in_file", type=Path, help="JSONL of emails (from ingest --out)")
+    lab.add_argument("--out", type=Path, required=True, help="output JSONL of labels")
+    lab.set_defaults(func=_cmd_label)
 
     return parser
 

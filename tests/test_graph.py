@@ -25,6 +25,25 @@ def _email() -> Email:
     )
 
 
+def test_graph_redacts_body() -> None:
+    email = Email(
+        id="e1",
+        thread_id="t1",
+        from_="hr@acme.com",
+        to="me@example.com",
+        subject="x",
+        date=None,
+        body_plain="Email me at john@acme.com - Zabed",
+        body_html="",
+        snippet="",
+    )
+    graph = build_graph(redact_names=["Zabed"])
+    result = graph.invoke({"email_id": "e1", "email": email})
+    assert "john@acme.com" not in result["body_text"]
+    assert "[EMAIL_1]" in result["body_text"]
+    assert "[PERSON_1]" in result["body_text"]
+
+
 def test_auto_path_runs_to_log() -> None:
     def classify(state):
         return {"category": "rejection", "category_probs": {"rejection": 0.99}, "needs_reply": False, "urgency": "low"}

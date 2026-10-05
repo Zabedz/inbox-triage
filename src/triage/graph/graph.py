@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 from langgraph.checkpoint.sqlite import SqliteSaver
@@ -12,6 +12,7 @@ from langgraph.types import RetryPolicy, interrupt
 
 from triage.graph.state import State
 from triage.guard import Action, GuardError, GuardThresholds, decide
+from triage.redact import redact as redact_text
 
 logger = logging.getLogger("triage.graph")
 
@@ -32,9 +33,9 @@ def fetch_context(state: State) -> dict[str, Any]:
     }
 
 
-def redact(state: State) -> dict[str, Any]:
+def redact(state: State, names: Sequence[str] = ()) -> dict[str, Any]:
     email = state["email"]
-    return {"body_text": email.body_plain}
+    return {"body_text": redact_text(email.body_plain, names=names).text}
 
 
 def classify(state: State) -> dict[str, Any]:
@@ -124,9 +125,13 @@ def build_graph(
     nodes: dict[str, Callable[[State], dict[str, Any]]] | None = None,
     thresholds: GuardThresholds | None = None,
     checkpointer: SqliteSaver | None = None,
+    redact_names: Sequence[str] = (),
 ) -> Any:
     thresholds = thresholds or GuardThresholds()
     overrides = nodes or {}
+
+    def _redact(state: State) -> dict[str, Any]:
+        return redact(state, names=redact_names)
 
     graph = StateGraph(State)
 
@@ -138,7 +143,7 @@ def build_graph(
             graph.add_node(name, node_action)
 
     add("fetch_context", overrides.get("fetch_context", fetch_context))
-    add("redact", overrides.get("redact", redact))
+    add("redact", overrides.get("redact", _redact))
     add("classify", overrides.get("classify", classify))
     add("extract", overrides.get("extract", extract))
     add("match", overrides.get("match", match))

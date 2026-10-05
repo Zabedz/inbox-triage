@@ -49,7 +49,14 @@ def build_service(cfg: Config) -> object:
     return build("gmail", "v1", credentials=creds)
 
 
-def ingest(cfg: Config, dry_run: bool = False) -> list[Email]:
+def auth(cfg: Config) -> None:
+    build_service(cfg)
+    print(f"authorised; token written to {cfg.gmail.token_path}")
+
+
+def ingest(
+    cfg: Config, dry_run: bool = False, out: str | Path | None = None
+) -> list[Email]:
     service = build_service(cfg)
     client = GmailClient(service)
     ids = client.list_job_messages(cfg.gmail.query)
@@ -58,6 +65,14 @@ def ingest(cfg: Config, dry_run: bool = False) -> list[Email]:
             print(mid)
         return []
     emails = [client.get_email(mid) for mid in ids]
-    for email in emails:
-        print(f"{email.id}\t{email.date}\t{email.from_}\t{email.subject}")
+    if out is not None:
+        out = Path(out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with out.open("w") as fh:
+            for email in emails:
+                fh.write(email.model_dump_json() + "\n")
+        print(f"wrote {len(emails)} emails to {out}")
+    else:
+        for email in emails:
+            print(f"{email.id}\t{email.date}\t{email.from_}\t{email.subject}")
     return emails

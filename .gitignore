@@ -8,6 +8,9 @@ client_secrets.json
 gmail-token.json
 *.token.json
 
+# generated synthetic datasets (regenerate with evals/datasets/generate.py)
+evals/datasets/*.jsonl
+
 # python
 __pycache__/
 *.py[cod]
