@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- REPO_DIR is replaced with the checkout path on install; see README. -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>local.inbox-triage</string>
+    <key>WorkingDirectory</key>
+    <string>REPO_DIR</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/sh</string>
+        <string>-c</string>
+        <string>.venv/bin/triage snapshot &amp;&amp; .venv/bin/triage run</string>
+    </array>
+    <key>StartInterval</key>
+    <integer>1800</integer>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>REPO_DIR/data/launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>REPO_DIR/data/launchd.log</string>
+</dict>
+</plist>

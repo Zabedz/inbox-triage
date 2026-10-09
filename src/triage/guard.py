@@ -37,6 +37,18 @@ AUTO_ACTIONS: set[Action] = {Action.LABEL, Action.ACK}
 THRESHOLD_GATED_AUTO: set[Action] = {Action.TRACKER_REJECTED}
 
 
+ACTION_DESCRIPTIONS: dict[Action, str] = {
+    Action.LABEL: "Label the email in Gmail only",
+    Action.ACK: "Record the application acknowledgement, no further action",
+    Action.TRACKER_REJECTED: "Mark the application as rejected in the tracker",
+    Action.CALENDAR_EVENT: "Create a calendar event for an interview or assessment",
+    Action.CALENDAR_CHANGE: "Reschedule an existing interview calendar event",
+    Action.TRACKER_INTERVIEW: "Mark the application as interview in the tracker",
+    Action.TRACKER_OFFER: "Mark the application as offer in the tracker",
+    Action.REPLY_DRAFT: "Draft a reply to the sender",
+}
+
+
 class GuardThresholds(BaseModel):
     category: float = 0.99
     match: float = 0.99

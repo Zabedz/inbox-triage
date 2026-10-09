@@ -57,6 +57,10 @@ class Config:
     zen_base_url: str = "https://opencode.ai/zen/v1"
     decision_backend: str = "jev"
     candidate_names: tuple[str, ...] = ()
+    guard_category_threshold: float = 0.99
+    guard_match_threshold: float = 0.99
+    agent_db: Path = Path("./data/agent.db")
+    checkpoints_db: Path = Path("./data/checkpoints.db")
 
 
 def _path(name: str, default: str) -> Path:
@@ -90,7 +94,10 @@ def load(env_path: str | Path | None = None) -> Config:
 
     gmail = GmailConfig(
         token_path=_path("GMAIL_TOKEN", DEFAULT_GMAIL_TOKEN),
-        scopes=("https://www.googleapis.com/auth/gmail.readonly",),
+        scopes=(
+            "https://www.googleapis.com/auth/gmail.readonly",
+            "https://www.googleapis.com/auth/gmail.modify",
+        ),
         query=os.environ.get("GMAIL_QUERY", DEFAULT_QUERY),
     )
 
@@ -108,4 +115,8 @@ def load(env_path: str | Path | None = None) -> Config:
             for name in os.environ.get("CANDIDATE_NAMES", "").split(",")
             if name.strip()
         ),
+        guard_category_threshold=float(os.environ.get("GUARD_CATEGORY_THRESHOLD", "0.99")),
+        guard_match_threshold=float(os.environ.get("GUARD_MATCH_THRESHOLD", "0.99")),
+        agent_db=data_dir / "agent.db",
+        checkpoints_db=data_dir / "checkpoints.db",
     )

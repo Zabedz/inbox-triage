@@ -9,6 +9,8 @@ from pathlib import Path
 from triage.config import load
 from triage.gmail.ingest import auth, ingest
 from triage.label_cli import label, load_emails
+from triage.review import review
+from triage.run import run
 from triage.tracker.db import TrackerDB
 from triage.tracker.snapshot import snapshot
 
@@ -44,6 +46,20 @@ def _cmd_label(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_run(args: argparse.Namespace) -> int:
+    cfg = load()
+    pending = run(cfg)
+    print(f"run complete: {len(pending)} emails awaiting approval")
+    return 0
+
+
+def _cmd_review(args: argparse.Namespace) -> int:
+    cfg = load()
+    handled = review(cfg)
+    print(f"reviewed {handled} approvals")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="triage")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -51,7 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
     snap = sub.add_parser("snapshot", help="copy tracker into local SQLite")
     snap.set_defaults(func=_cmd_snapshot)
 
-    auth_p = sub.add_parser("auth", help="authorise Gmail (read-only)")
+    auth_p = sub.add_parser("auth", help="authorise Gmail (read + label, no send)")
     auth_p.set_defaults(func=_cmd_auth)
 
     ing = sub.add_parser("ingest", help="list/fetch job-related Gmail")
@@ -63,6 +79,12 @@ def build_parser() -> argparse.ArgumentParser:
     lab.add_argument("in_file", type=Path, help="JSONL of emails (from ingest --out)")
     lab.add_argument("--out", type=Path, required=True, help="output JSONL of labels")
     lab.set_defaults(func=_cmd_label)
+
+    run_p = sub.add_parser("run", help="run the triage graph over new email")
+    run_p.set_defaults(func=_cmd_run)
+
+    rev_p = sub.add_parser("review", help="review pending approvals")
+    rev_p.set_defaults(func=_cmd_review)
 
     return parser
 

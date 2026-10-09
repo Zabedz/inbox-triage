@@ -15,10 +15,11 @@ CLIENT_SECRETS = "client_secrets.json"
 
 
 def build_service(cfg: Config) -> object:
-    """Build a gmail.readonly service using an installed-app OAuth flow.
+    """Build a Gmail service (read + label) using an installed-app OAuth flow.
 
     Reads `client_secrets.json` from the data dir and stores the refreshed token at
-    `cfg.gmail.token_path`. Never requests a send scope.
+    `cfg.gmail.token_path`. A token missing a configured scope is re-authorised.
+    Never requests a send scope.
     """
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
@@ -31,6 +32,8 @@ def build_service(cfg: Config) -> object:
         creds = Credentials.from_authorized_user_file(  # type: ignore[no-untyped-call]
             str(token_path), cfg.gmail.scopes
         )
+        if not creds.has_scopes(cfg.gmail.scopes):
+            creds = None
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())  # type: ignore[no-untyped-call]

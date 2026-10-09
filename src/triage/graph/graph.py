@@ -84,16 +84,13 @@ def guard(state: State, thresholds: GuardThresholds) -> dict[str, Any]:
     return {"guard_decision": decision.route, "reason": decision.reason}
 
 
-def apply(state: State) -> dict[str, Any]:
-    logger.info("auto-applying action=%s for email=%s", state.get("action"), state.get("email_id"))
-    return {}
-
-
 def approval(state: State) -> dict[str, Any]:
     payload = {
         "email_id": state.get("email_id"),
         "category": state.get("category"),
         "category_probs": state.get("category_probs"),
+        "matched_id": state.get("matched_id"),
+        "match_prob": state.get("match_prob"),
         "action": state.get("action"),
         "draft": state.get("draft"),
         "reason": state.get("reason"),
@@ -105,22 +102,6 @@ def approval(state: State) -> dict[str, Any]:
         "action": decision.get("action", state.get("action")),
         "reason": decision.get("reason"),
     }
-
-
-def log(state: State) -> dict[str, Any]:
-    entry = {
-        "email_id": state.get("email_id"),
-        "category": state.get("category"),
-        "category_probs": state.get("category_probs"),
-        "matched_id": state.get("matched_id"),
-        "match_prob": state.get("match_prob"),
-        "action": state.get("action"),
-        "guard_decision": state.get("guard_decision"),
-        "reason": state.get("reason"),
-    }
-    trail = list(state.get("trail", []))
-    trail.append(entry)
-    return {"trail": trail}
 
 
 def _route_after_guard(state: State) -> str:
@@ -135,6 +116,9 @@ def build_graph(
     decision_model: DecisionModel | None = None,
     extract_model: GenerativeModel | None = None,
     match_node: Callable[[State], dict[str, Any]] | None = None,
+    propose_action_node: Callable[[State], dict[str, Any]] | None = None,
+    apply_sink: Callable[[State], None] | None = None,
+    log_sink: Callable[[dict[str, Any]], None] | None = None,
 ) -> Any:
     thresholds = thresholds or GuardThresholds()
     overrides = nodes or {}
@@ -150,6 +134,34 @@ def build_graph(
     if extract_model is not None:
         extract_node = build_extract(extract_model)
 
+    def _apply(state: State) -> dict[str, Any]:
+        logger.info(
+            "applying action=%s for email=%s (%s)",
+            state.get("action"),
+            state.get("email_id"),
+            state.get("reason"),
+        )
+        if apply_sink is not None:
+            apply_sink(state)
+        return {}
+
+    def _log(state: State) -> dict[str, Any]:
+        entry = {
+            "email_id": state.get("email_id"),
+            "category": state.get("category"),
+            "category_probs": state.get("category_probs"),
+            "matched_id": state.get("matched_id"),
+            "match_prob": state.get("match_prob"),
+            "action": state.get("action"),
+            "guard_decision": state.get("guard_decision"),
+            "reason": state.get("reason"),
+        }
+        trail = list(state.get("trail", []))
+        trail.append(entry)
+        if log_sink is not None:
+            log_sink(entry)
+        return {"trail": trail}
+
     graph = StateGraph(State)
 
     def add(name: str, action: Callable[[State], dict[str, Any]]) -> None:
@@ -164,11 +176,11 @@ def build_graph(
     add("classify", overrides.get("classify", classify_node))
     add("extract", overrides.get("extract", extract_node))
     add("match", overrides.get("match", match_node or match))
-    add("propose_action", overrides.get("propose_action", propose_action))
+    add("propose_action", overrides.get("propose_action", propose_action_node or propose_action))
     add("guard", overrides.get("guard", lambda s: guard(s, thresholds)))
-    add("apply", overrides.get("apply", apply))
+    add("apply", overrides.get("apply", _apply))
     add("approval", overrides.get("approval", approval))
-    add("log", overrides.get("log", log))
+    add("log", overrides.get("log", _log))
 
     graph.add_edge(START, "fetch_context")
     graph.add_edge("fetch_context", "redact")
@@ -181,7 +193,7 @@ def build_graph(
         "guard", _route_after_guard, {"auto": "apply", "approval": "approval"}
     )
     graph.add_edge("apply", "log")
-    graph.add_edge("approval", "log")
+    graph.add_edge("approval", "apply")
     graph.add_edge("log", END)
 
     return graph.compile(checkpointer=checkpointer)
