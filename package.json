@@ -5,7 +5,12 @@
   "description": "Job-search inbox triage agent. promptfoo evals for node and end-to-end graphs.",
   "scripts": {
     "generate:synthetic": "python evals/datasets/generate.py evals/datasets/synthetic.jsonl && python evals/datasets/to_promptfoo.py evals/datasets/synthetic.jsonl evals/datasets/synthetic.promptfoo.jsonl",
-    "eval:classify": "npm run generate:synthetic && promptfoo eval -c evals/promptfooconfig/classify.yaml -o evals/results/classify.json && python -m evals.calibrate evals/results/classify.json"
+    "eval:classify": "mkdir -p evals/results && npm run generate:synthetic && PYTHONPATH=. promptfoo eval -c evals/promptfooconfig/classify.yaml -o evals/results/classify.json && python -m evals.calibrate evals/results/classify.json",
+    "eval:extract": "mkdir -p evals/results && npm run generate:synthetic && PYTHONPATH=. promptfoo eval -c evals/promptfooconfig/extract.yaml -o evals/results/extract.json",
+    "eval:match": "mkdir -p evals/results && npm run generate:synthetic && PYTHONPATH=. promptfoo eval -c evals/promptfooconfig/match.yaml -o evals/results/match.json",
+    "eval:e2e": "mkdir -p evals/results && npm run generate:synthetic && PYTHONPATH=. PROMPTFOO_FAILED_TEST_EXIT_CODE=0 promptfoo eval -c evals/promptfooconfig/e2e.yaml --no-cache -o evals/results/e2e.json && python -m evals.report evals/results/e2e.json --suite e2e && python -m evals.calibrate evals/results/e2e.json",
+    "eval:redteam": "mkdir -p evals/results && npm run generate:synthetic && PYTHONPATH=. PROMPTFOO_FAILED_TEST_EXIT_CODE=0 promptfoo eval -c evals/promptfooconfig/redteam.yaml --no-cache -o evals/results/redteam.json && python -m evals.report evals/results/redteam.json --suite redteam",
+    "eval:ci": "sh evals/ci.sh rules"
   },
   "devDependencies": {
     "promptfoo": "^0.123.1"

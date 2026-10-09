@@ -1,5 +1,7 @@
 # secrets and local data
 .env
+.env.*
+!.env.example
 data/
 *.db
 *.sqlite
@@ -8,9 +10,12 @@ client_secrets.json
 gmail-token.json
 *.token.json
 
-# generated synthetic datasets (regenerate with evals/datasets/generate.py)
-evals/datasets/*.json
-evals/datasets/*.jsonl
+# email exports and generated datasets (regenerate with evals/datasets/generate.py)
+*.jsonl
+evals/datasets/*
+!evals/datasets/__init__.py
+!evals/datasets/generate.py
+!evals/datasets/to_promptfoo.py
 evals/results/
 
 # python

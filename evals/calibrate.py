@@ -6,9 +6,15 @@ is the per-sample correct option.
 
 from __future__ import annotations
 
+import argparse
 import json
+import math
 from pathlib import Path
 from typing import Any
+
+from evals import scoring
+from triage.config import MIN_GUARD_THRESHOLD
+from triage.guard import Action
 
 
 def _max_conf(probs: list[dict[str, float]]) -> list[float]:
@@ -102,6 +108,69 @@ def recommend_threshold(
     return None
 
 
+def recommend_guard_thresholds(
+    rows: list[tuple[float, float, bool]], target_failure: float = 0.05
+) -> tuple[float, float, int, float] | None:
+    """(category, match, admitted, error bound) admitting the most auto rejections.
+
+    ``rows`` are (category_prob, match_prob, correct) for every proposed tracker rejection
+    with a matched row. Both probabilities gate together, so they are searched jointly. A
+    pair qualifies only when the 95% upper bound on its error rate is within the target,
+    which needs about 52 error-free rows at 5%; fewer gives None.
+    """
+    best: tuple[float, float, int, float] | None = None
+    for cat in sorted({r[0] for r in rows}):
+        for match in sorted({r[1] for r in rows}):
+            admitted = [r for r in rows if r[0] >= cat and r[1] >= match]
+            if not admitted or (best is not None and len(admitted) <= best[2]):
+                continue
+            bound = scoring.wilson_upper(sum(1 for r in admitted if not r[2]), len(admitted))
+            if bound <= target_failure:
+                # Tightest pair admitting exactly these rows.
+                tight = (min(r[0] for r in admitted), min(r[1] for r in admitted))
+                best = (*tight, len(admitted), bound)
+    return best
+
+
+def round_up(value: float, places: int = 3) -> float:
+    """Round a point-estimate threshold up, toward caution."""
+    scale = float(10**places)
+    return math.ceil(round(value * scale, 6)) / scale
+
+
+def guard_rows(path: str | Path) -> dict[str, list[tuple[float, float, bool]]]:
+    """Per-provider rows for ``recommend_guard_thresholds`` from an e2e results file."""
+    data = json.loads(Path(path).read_text())
+    by_provider: dict[str, list[tuple[float, float, bool]]] = {}
+    for result in data["results"]["results"]:
+        output = (result.get("response") or {}).get("output")
+        if not isinstance(output, str) or '"guard_decision"' not in output:
+            continue
+        out = scoring.parse_output(output)
+        if out.get("action") != Action.TRACKER_REJECTED or out.get("matched_id") is None:
+            continue
+        provider = scoring.provider_id(result)
+        correct = scoring.applied_ok(Action.TRACKER_REJECTED, out, result.get("vars") or {})
+        by_provider.setdefault(provider, []).append(
+            (float(out["category_prob"]), float(out["match_prob"]), correct)
+        )
+    return by_provider
+
+
+def guard_lines(rows: list[tuple[float, float, bool]], target_failure: float) -> list[str]:
+    """``.env`` lines for the recommended pair, printed exactly: the guard compares with
+    ``>=``, so any rounding would change which rows the bound describes."""
+    found = recommend_guard_thresholds(rows, target_failure)
+    if found is None:
+        return [f"insufficient evidence for a 95% bound within {target_failure:.0%}; keep 0.99"]
+    cat, match = (max(t, MIN_GUARD_THRESHOLD) for t in found[:2])
+    return [
+        f"admitted={found[2]} error_upper95={found[3]:.3f}",
+        f"GUARD_CATEGORY_THRESHOLD={cat!r}",
+        f"GUARD_MATCH_THRESHOLD={match!r}",
+    ]
+
+
 def render_reliability(rows: list[tuple[float, float, int]]) -> str:
     lines = ["confidence  accuracy  count", "-" * 28]
     for conf, acc, count in rows:
@@ -141,13 +210,19 @@ def main(results_path: str, out_path: str | None = None, target_failure: float =
         labels = data["labels"]
         options = sorted({opt for p in probs for opt in p} | set(labels))
         threshold = recommend_threshold(probs, labels, target_failure=target_failure)
-        threshold_text = "none" if threshold is None else f"{threshold:.2f}"
+        threshold_text = "none" if threshold is None else f"{round_up(threshold):.3f}"
         lines.append(f"== {provider} (n={len(labels)}) ==")
         lines.append(
             f"ECE={ece(probs, labels):.4f}  Brier={brier(probs, labels, options):.4f}  "
-            f"threshold({target_failure:.0%} silent failure)={threshold_text}"
+            f"point-estimate threshold({target_failure:.0%} error)={threshold_text}"
         )
         lines.append(render_reliability(reliability(probs, labels)))
+        lines.append("")
+    for provider, rows in sorted(guard_rows(results_path).items()):
+        if provider == "rules":
+            continue  # its probabilities are keyword counts
+        lines.append(f"== guard thresholds / {provider} (rejections proposed={len(rows)}) ==")
+        lines.extend(guard_lines(rows, target_failure))
         lines.append("")
     report = "\n".join(lines)
     print(report)
@@ -157,9 +232,9 @@ def main(results_path: str, out_path: str | None = None, target_failure: float =
 
 
 if __name__ == "__main__":
-    import sys
-
-    results = sys.argv[1]
-    out = sys.argv[2] if len(sys.argv) > 2 else None
-    main(results, out)
-
+    parser = argparse.ArgumentParser(prog="python -m evals.calibrate")
+    parser.add_argument("results", help="promptfoo results JSON (classify or e2e)")
+    parser.add_argument("out", nargs="?", help="write the report here too")
+    parser.add_argument("--target", type=float, default=0.05, help="silent failure target")
+    args = parser.parse_args()
+    main(args.results, args.out, args.target)

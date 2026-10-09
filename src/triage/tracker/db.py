@@ -27,6 +27,12 @@ def _row_to_application(row: sqlite3.Row) -> Application:
     )
 
 
+def _like(term: str) -> str:
+    """A LIKE pattern matching ``term`` literally anywhere in the value."""
+    escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
 class TrackerDB:
     def __init__(self, path: str | Path) -> None:
         self._conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
@@ -36,9 +42,10 @@ class TrackerDB:
         self._conn.close()
 
     def search(self, query: str, limit: int = 10) -> list[Application]:
-        like = f"%{query.strip()}%"
+        like = _like(query.strip())
         cur = self._conn.execute(
-            "SELECT * FROM applications WHERE company LIKE ? OR role LIKE ? LIMIT ?",
+            "SELECT * FROM applications WHERE company LIKE ? ESCAPE '\\' "
+            "OR role LIKE ? ESCAPE '\\' LIMIT ?",
             (like, like, limit),
         )
         return [_row_to_application(r) for r in cur.fetchall()]
@@ -46,26 +53,21 @@ class TrackerDB:
     def search_tracker(
         self, company: str = "", role: str = "", limit: int = 10
     ) -> list[Application]:
+        """Rows whose company and/or role contain the terms; no terms returns no rows."""
         company = company.strip().lower()
         role = role.strip().lower()
-        if company and role:
-            cur = self._conn.execute(
-                "SELECT * FROM applications "
-                "WHERE lower(company) LIKE ? AND lower(role) LIKE ? LIMIT ?",
-                (f"%{company}%", f"%{role}%", limit),
-            )
-        elif company:
-            cur = self._conn.execute(
-                "SELECT * FROM applications WHERE lower(company) LIKE ? LIMIT ?",
-                (f"%{company}%", limit),
-            )
-        elif role:
-            cur = self._conn.execute(
-                "SELECT * FROM applications WHERE lower(role) LIKE ? LIMIT ?",
-                (f"%{role}%", limit),
-            )
-        else:
-            cur = self._conn.execute("SELECT * FROM applications LIMIT ?", (limit,))
+        clauses = []
+        params: list[str | int] = []
+        for column, term in (("company", company), ("role", role)):
+            if term:
+                clauses.append(f"lower({column}) LIKE ? ESCAPE '\\'")
+                params.append(_like(term))
+        if not clauses:
+            return []
+        cur = self._conn.execute(
+            f"SELECT * FROM applications WHERE {' AND '.join(clauses)} LIMIT ?",  # noqa: S608
+            (*params, limit),
+        )
         return [_row_to_application(r) for r in cur.fetchall()]
 
     def get(self, tracker_id: int) -> Application | None:

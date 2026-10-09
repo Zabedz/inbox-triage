@@ -94,3 +94,12 @@ def test_match_tool_call_cap(tracker_db: TrackerDB) -> None:
     node = build_match(tracker_db, InfiniteLLM(), FixedDecision("candidate_0", 0.9), max_tool_calls=3)
     out = node(_state())
     assert out["matched_id"] == 1
+
+
+def test_unfiltered_search_adds_no_candidates(tracker_db: TrackerDB) -> None:
+    llm = ScriptedLLM([MatchStep(action="search_tracker"), MatchStep(action="done")])
+    node = build_match(tracker_db, llm, FixedDecision("candidate_0", 0.9))
+
+    out = node(_state())
+    assert out["candidates"] == []
+    assert out["matched_id"] is None

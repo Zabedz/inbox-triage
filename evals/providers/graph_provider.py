@@ -1,20 +1,28 @@
-"""promptfoo Python provider: classify / extract / match nodes."""
+"""promptfoo Python provider: single nodes (classify, extract, match) or the full graph (e2e)."""
 
 from __future__ import annotations
 
+import atexit
 import json
 import os
 import tempfile
+import uuid
 from datetime import date
 from pathlib import Path
 from typing import Any
 
+from langgraph.checkpoint.memory import InMemorySaver
+
+from evals.providers.rules import RulesDecisionModel, RulesGenerativeModel
+from triage.agent import assemble
 from triage.config import load
+from triage.gmail.client import Email
 from triage.graph.graph import sender_domain
 from triage.graph.nodes.classify import build_classify
 from triage.graph.nodes.extract import ExtractedField, Extraction, build_extract
 from triage.graph.nodes.match import MatchStep, build_match
 from triage.graph.state import State
+from triage.guard import Action, GuardThresholds
 from triage.models import build_decision_model
 from triage.models.base import Answer
 from triage.models.llm import build_generative_model
@@ -59,6 +67,8 @@ class _FakeMatchDecision:
 
 _synthetic_db: TrackerDB | None = None
 
+FILLER = "This paragraph is filler that makes the email long. "
+
 
 def _synthetic_tracker() -> TrackerDB:
     global _synthetic_db
@@ -69,6 +79,7 @@ def _synthetic_tracker() -> TrackerDB:
             )
         fd, path = tempfile.mkstemp(prefix="triage-synthetic-", suffix=".db")
         os.close(fd)
+        atexit.register(os.unlink, path)
         rows = json.loads(_TRACKER_PATH.read_text())
         apps = [
             Application(
@@ -132,15 +143,96 @@ def _call_match(kind: str, state: State) -> dict[str, Any]:
     return {"output": json.dumps(result["matched_id"])}
 
 
+def _thresholds(config: dict[str, Any]) -> GuardThresholds:
+    """From the provider config, so results are reproducible across machines."""
+    defaults = GuardThresholds()
+    return GuardThresholds(
+        category=float(config.get("category_threshold", defaults.category)),
+        match=float(config.get("match_threshold", defaults.match)),
+    )
+
+
+def _call_e2e(
+    kind: str, vars_: dict[str, Any], config: dict[str, Any], names: tuple[str, ...]
+) -> dict[str, Any]:
+    tracker = _synthetic_tracker()
+    decision: Any
+    generative: Any
+    model = kind
+    if kind == "rules":
+        decision = RulesDecisionModel()
+        generative = RulesGenerativeModel([r for i in tracker.ids() if (r := tracker.get(i))])
+    else:
+        cfg = load()
+        if not cfg.llm_provider:
+            raise ValueError(f"e2e/{kind} needs LLM_PROVIDER; extract and match would run as stubs")
+        decision = build_decision_model(cfg, backend=kind)
+        generative = build_generative_model(cfg)
+        model = f"{kind}+{cfg.llm_provider}:{cfg.llm_model}"
+    thresholds = _thresholds(config)
+
+    applied: list[str] = []
+
+    def record(action: Action, state: State) -> None:
+        applied.append(action.value)
+
+    graph = assemble(
+        decision=decision,
+        generative=generative,
+        tracker=tracker,
+        thresholds=thresholds,
+        apply_sink=record,
+        log_sink=None,
+        checkpointer=InMemorySaver(),
+        redact_names=names,
+    )
+    body = vars_.get("body", "")
+    if padding := int(vars_.get("body_padding") or 0):
+        body = (FILLER * (padding // len(FILLER) + 1))[:padding] + "\n\n" + body
+    email = Email(
+        id=str(vars_.get("email_id", "eval")),
+        thread_id="eval",
+        from_=vars_.get("from_", ""),
+        to="",
+        subject=vars_.get("subject", ""),
+        date=None,
+        body_plain=body,
+        body_html=vars_.get("body_html", ""),
+        snippet="",
+    )
+    thread = {"configurable": {"thread_id": f"eval-{uuid.uuid4().hex}"}}
+    result = graph.invoke({"email_id": email.id, "email": email}, config=thread)
+    category = result.get("category")
+    probs = result.get("category_probs", {})
+    output = {
+        "category": category,
+        "category_prob": probs.get(category, 0.0),
+        "matched_id": result.get("matched_id"),
+        "match_prob": result.get("match_prob", 0.0),
+        "action": result.get("action"),
+        "action_prob": result.get("action_prob", 0.0),
+        "guard_decision": result.get("guard_decision"),
+        "applied": applied,
+        "draft": result.get("draft"),
+        "thresholds": [thresholds.category, thresholds.match],
+        "model": model,
+    }
+    named_scores = {f"p_{option}": prob for option, prob in probs.items()}
+    return {"output": json.dumps(output), "namedScores": named_scores}
+
+
 def call_api(prompt: str, options: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     config = (options or {}).get("config", {})
     task = config.get("task", "classify")
     kind = config.get("model", "jev")
-    cfg = None if kind == "fake" else load()
+    cfg = None if kind in ("fake", "rules") else load()
     names = cfg.candidate_names if cfg else ()
+    vars_ = context.get("vars", {})
 
-    state = _build_state(context.get("vars", {}), names)
+    if task == "e2e":
+        return _call_e2e(kind, vars_, config, names)
 
+    state = _build_state(vars_, names)
     if task == "extract":
         return _call_extract(kind, state)
     if task == "match":

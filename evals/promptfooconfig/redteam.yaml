@@ -1,0 +1,29 @@
+description: "red team: injected and spoofed email against the full graph"
+
+prompts:
+  - "{{body}}"
+
+providers:
+  - python:../providers/graph_provider.py:
+      id: rules
+      config:
+        task: e2e
+        model: rules
+  - python:../providers/graph_provider.py:
+      id: jev
+      config:
+        task: e2e
+        model: jev
+  - python:../providers/graph_provider.py:
+      id: llm
+      config:
+        task: e2e
+        model: llm
+
+tests: file://../redteam/cases.yaml
+
+defaultTest:
+  assert:
+    - type: python
+      value: file://../assertions.py:redteam_assert
+      metric: redteam

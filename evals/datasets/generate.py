@@ -123,7 +123,7 @@ def _rejection(rng: random.Random, i: int) -> LabeledEmail:
     )
     row = _row(company, role, req)
     body = (
-        f"Dear candidate,\n\nThank you for applying to the {role} role at {company}. "
+        f"Dear candidate,\n\nThank you for applying to the {role} role at {company} (req {req}). "
         "After careful consideration, we have decided not to move forward with your "
         "application at this time. We wish you the best in your search.\n\nRegards,\n"
         f"{company} Talent Team"
@@ -133,7 +133,7 @@ def _rejection(rng: random.Random, i: int) -> LabeledEmail:
         f"no-reply@{_domain(company)}",
         f"Your application to {company}",
         body,
-        ExtractedFields(company=company, role=role),
+        ExtractedFields(company=company, role=role, requisition_id=req),
         Action.TRACKER_REJECTED,
     )
 
@@ -348,8 +348,124 @@ def _ambiguous(rng: random.Random) -> LabeledEmail:
         category="rejection",
         extracted=ExtractedFields(),
         matched_tracker_id=None,
-        action=None,
+        action=Action.LABEL,
     )
+
+
+def _special(
+    name: str,
+    from_: str,
+    subject: str,
+    body: str,
+    category: Category,
+    row_id: int | None,
+    action: Action | None,
+    **fields: str,
+) -> LabeledEmail:
+    return LabeledEmail(
+        email_id=f"syn-special-{name}",
+        from_=from_,
+        subject=subject,
+        body=body,
+        category=category,
+        extracted=ExtractedFields(**fields),
+        matched_tracker_id=row_id,
+        action=action,
+    )
+
+
+def _hard_cases() -> list[LabeledEmail]:
+    """Paraphrases without template phrasing, and negatives that resemble an auto path."""
+    return [
+        _special(
+            "invite-with-ack-boilerplate", "recruiting@initech.com", "Next steps - Initech",
+            "We have received your application. We would like to invite you to interview for "
+            "the Data Scientist position at Initech (req IN-3001) on 2026-10-29 at 10:00 GMT.",
+            "interview_invite", 3, Action.CALENDAR_EVENT,
+            company="Initech", role="Data Scientist", requisition_id="IN-3001",
+            date_time="2026-10-29T10:00", timezone="Etc/UTC",
+        ),
+        _special(
+            "job-alert", "alerts@jobboard.example", "5 new AI Engineer roles",
+            "Five new AI Engineer roles match your search this week. Unfortunately, a listing "
+            "you saved at Globex has expired.",
+            "other", None, None,
+        ),
+        _special(
+            "rejection-untracked-company", "careers@starkindustries.com",
+            "Your application to Stark Industries",
+            "Thank you for applying to the Data Engineer role at Stark Industries. "
+            "Unfortunately we will not be progressing your application.",
+            "rejection", None, Action.LABEL,
+            company="Stark Industries", role="Data Engineer",
+        ),
+        _special(
+            "agency-rejection", "updates@talentbridge.com", "Update on Hooli",
+            "I'm writing from TalentBridge on behalf of Hooli. They have decided not to proceed "
+            "with your AI Engineer application (req HO-5001).",
+            "rejection", 6, Action.TRACKER_REJECTED,
+            company="Hooli", role="AI Engineer", requisition_id="HO-5001", agency="TalentBridge",
+        ),
+        _special(
+            "ack-untracked-company", "jobs@wayneenterprises.com", "Application received",
+            "We have received your application for the Product Manager role at Wayne "
+            "Enterprises. We will be in touch.",
+            "application_ack", None, Action.ACK,
+            company="Wayne Enterprises", role="Product Manager",
+        ),
+        _special(
+            "rejection-position-filled", "talent@globex.com", "Software Engineer role",
+            "The Software Engineer position at Globex (GL-2001) has now been filled. We "
+            "appreciate the time you put into the process.",
+            "rejection", 2, Action.TRACKER_REJECTED,
+            company="Globex", role="Software Engineer", requisition_id="GL-2001",
+        ),
+        _special(
+            "rejection-another-applicant", "people@initech.com", "Data Scientist role",
+            "We've gone with another applicant for the Data Scientist role at Initech "
+            "(IN-3001). Thank you for your interest.",
+            "rejection", 3, Action.TRACKER_REJECTED,
+            company="Initech", role="Data Scientist", requisition_id="IN-3001",
+        ),
+        _special(
+            "ack-paraphrase", "careers@umbrella.com", "Thanks for applying",
+            "Thanks for applying to Umbrella for the Machine Learning Engineer role (UM-4001). "
+            "Our team will review it shortly.",
+            "application_ack", 5, Action.ACK,
+            company="Umbrella", role="Machine Learning Engineer", requisition_id="UM-4001",
+        ),
+        _special(
+            "invite-paraphrase", "ml-team@umbrella.com", "Video call?",
+            "Could you join us for a video call with the Umbrella ML team on 2026-10-30 at "
+            "15:00 GMT to talk through the Machine Learning Engineer role?",
+            "interview_invite", 5, Action.CALENDAR_EVENT,
+            company="Umbrella", role="Machine Learning Engineer",
+            date_time="2026-10-30T15:00", timezone="Etc/UTC",
+        ),
+        _special(
+            "offer-paraphrase", "people@hooli.com", "Good news",
+            "I'm thrilled to let you know the Hooli team would like you to join as AI Engineer "
+            "(HO-5001). The contract will follow.",
+            "offer", 6, Action.TRACKER_OFFER,
+            company="Hooli", role="AI Engineer", requisition_id="HO-5001",
+        ),
+        _special(
+            "assessment-paraphrase", "hiring@globex.com", "Next step",
+            "The next step for the Software Engineer role at Globex (GL-2001) is a 90-minute "
+            "coding exercise. Please finish it by 2026-10-25.",
+            "assessment", 2, Action.CALENDAR_EVENT,
+            company="Globex", role="Software Engineer", requisition_id="GL-2001",
+            deadline="2026-10-25",
+        ),
+        _special(
+            "reschedule-paraphrase", "people@initech.com", "Change of plan",
+            "Something came up on our side. Could we move your Data Scientist interview at "
+            "Initech to 2026-10-28 at 16:00 GMT?",
+            "interview_reschedule", 3, Action.CALENDAR_CHANGE,
+            company="Initech", role="Data Scientist",
+            date_time="2026-10-28T16:00", timezone="Etc/UTC",
+        ),
+    ]
 
 
 def generate(out: str | Path, seed: int = 0, n_per_category: int = 10) -> int:
@@ -358,6 +474,7 @@ def generate(out: str | Path, seed: int = 0, n_per_category: int = 10) -> int:
     for category in CATEGORIES:
         records.extend(GENERATORS[category](rng, i) for i in range(n_per_category))
     records.extend([_agency_unnamed(rng), _near_duplicate(rng), _timezone(rng), _ambiguous(rng)])
+    records.extend(_hard_cases())
 
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)

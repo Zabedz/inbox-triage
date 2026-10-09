@@ -1,0 +1,38 @@
+description: "e2e: full graph per email, rules baseline vs Jev vs LLM"
+
+prompts:
+  - "{{body}}"
+
+providers:
+  - python:../providers/graph_provider.py:
+      id: rules
+      config:
+        task: e2e
+        model: rules
+  - python:../providers/graph_provider.py:
+      id: jev
+      config:
+        task: e2e
+        model: jev
+  - python:../providers/graph_provider.py:
+      id: llm
+      config:
+        task: e2e
+        model: llm
+
+tests: ../datasets/synthetic.promptfoo.jsonl
+
+defaultTest:
+  assert:
+    - type: python
+      value: file://../assertions.py:e2e_category
+      metric: category
+    - type: python
+      value: file://../assertions.py:e2e_match
+      metric: match
+    - type: python
+      value: file://../assertions.py:e2e_action
+      metric: action
+    - type: python
+      value: file://../assertions.py:e2e_safety
+      metric: safety

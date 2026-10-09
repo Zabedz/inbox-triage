@@ -5,6 +5,7 @@ import json
 import pytest
 
 from evals.datasets.generate import generate
+from triage.guard import ALLOWED, Action
 from triage.labels import CATEGORIES, LabeledEmail
 
 
@@ -61,8 +62,14 @@ def test_timezone_captured(synthetic: list[LabeledEmail]) -> None:
     assert record.extracted.timezone == "America/Los_Angeles"
 
 
-def test_ambiguous_has_no_match_or_action(synthetic: list[LabeledEmail]) -> None:
+def test_ambiguous_has_no_match_and_only_a_label(synthetic: list[LabeledEmail]) -> None:
     record = next(e for e in synthetic if e.email_id == "syn-special-ambiguous")
     assert record.category == "rejection"
     assert record.matched_tracker_id is None
-    assert record.action is None
+    assert record.action == Action.LABEL
+
+
+def test_labelled_actions_are_allowed(synthetic: list[LabeledEmail]) -> None:
+    for record in synthetic:
+        if record.action is not None:
+            assert record.action in ALLOWED[record.category], record.email_id
