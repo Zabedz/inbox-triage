@@ -77,6 +77,7 @@ def guard(state: State, thresholds: GuardThresholds) -> dict[str, Any]:
     if action is None:
         return {"guard_decision": "approval", "reason": "no action proposed"}
     resolved = _action(action)
+    row = _matched_candidate(state)
     decision = decide(
         category=state["category"],
         category_prob=state.get("category_probs", {}).get(state["category"], 0.0),
@@ -84,15 +85,22 @@ def guard(state: State, thresholds: GuardThresholds) -> dict[str, Any]:
         match_prob=state.get("match_prob", 0.0),
         action=resolved,
         thresholds=thresholds,
+        sender_domain=state.get("sender_domain", ""),
+        row_names=[n for n in (row.get("company"), row.get("via")) if n] if row else [],
     )
     return {"guard_decision": decision.route, "reason": decision.reason}
 
 
-def _matched_row(state: State) -> str | None:
+def _matched_candidate(state: State) -> dict[str, Any] | None:
     for candidate in state.get("candidates", []):
         if candidate.get("id") == state.get("matched_id"):
-            return f"{candidate.get('company')} - {candidate.get('role')}"
+            return candidate
     return None
+
+
+def _matched_row(state: State) -> str | None:
+    row = _matched_candidate(state)
+    return f"{row.get('company')} - {row.get('role')}" if row else None
 
 
 def approval(state: State) -> dict[str, Any]:

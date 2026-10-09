@@ -26,7 +26,7 @@ def rejection_graph(applied: list, log: DecisionLog, category_prob: float, match
         return {"category": "rejection", "category_probs": {"rejection": category_prob}}
 
     def match(state):
-        return {"candidates": [], "matched_id": 4, "match_prob": match_prob}
+        return {"candidates": [{"id": 4, "company": "Acme Corp", "via": ""}], "matched_id": 4, "match_prob": match_prob}
 
     def propose_action(state):
         return {"action": "tracker_rejected", "action_prob": 0.99, "draft": None}

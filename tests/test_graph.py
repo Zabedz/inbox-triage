@@ -49,7 +49,7 @@ def test_auto_path_runs_to_log() -> None:
         return {"category": "rejection", "category_probs": {"rejection": 0.99}, "needs_reply": False, "urgency": "low"}
 
     def match(state):
-        return {"candidates": [], "matched_id": 12, "match_prob": 0.99}
+        return {"candidates": [{"id": 12, "company": "Acme"}], "matched_id": 12, "match_prob": 0.99}
 
     def propose_action(state):
         return {"action": "tracker_rejected", "action_prob": 0.99, "draft": None}

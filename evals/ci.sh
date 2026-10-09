@@ -19,6 +19,7 @@ esac
 export PYTHONPATH=.
 export PROMPTFOO_PYTHON="${PROMPTFOO_PYTHON:-python}"
 # evals.report owns pass/fail; promptfoo would also fail on red-team cases recorded as known.
+# --no-write keeps runs out of promptfoo's local results database; the JSON in -o is the record.
 export PROMPTFOO_FAILED_TEST_EXIT_CODE=0
 export PROMPTFOO_DISABLE_TELEMETRY=1 PROMPTFOO_DISABLE_UPDATE=1
 
@@ -32,7 +33,8 @@ for suite in e2e redteam; do
     out="evals/results/$suite-$provider.json"
     rm -f "$out"
     npx --no promptfoo eval -c "evals/promptfooconfig/$suite.yaml" \
-        --filter-providers "^$provider\$" --no-cache --no-table --no-progress-bar -o "$out" ||
+        --filter-providers "^$provider\$" --no-cache --no-write --no-table --no-progress-bar \
+        -o "$out" ||
         status=1
     if [ -f "$out" ]; then
         "$PROMPTFOO_PYTHON" -m evals.report "$out" --suite "$suite" \

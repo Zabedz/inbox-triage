@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from triage.guard import Action, GuardError, GuardThresholds, decide
+from triage.guard import Action, GuardError, GuardThresholds, decide, sender_matches
 
 T = GuardThresholds(category=0.9, match=0.9)
 
@@ -18,7 +18,7 @@ def test_ack_auto() -> None:
 
 
 def test_rejection_auto_when_thresholds_met() -> None:
-    d = decide("rejection", 0.95, 12, 0.95, Action.TRACKER_REJECTED, T)
+    d = decide("rejection", 0.95, 12, 0.95, Action.TRACKER_REJECTED, T, "acme.com", ["Acme Corp"])
     assert d.route == "auto"
 
 
@@ -65,5 +65,48 @@ def test_unknown_category_raises() -> None:
 )
 def test_rejection_needs_both_thresholds(category_prob, match_prob, route) -> None:
     thresholds = GuardThresholds(category=0.99, match=0.99)
-    d = decide("rejection", category_prob, 12, match_prob, Action.TRACKER_REJECTED, thresholds)
+    d = decide(
+        "rejection", category_prob, 12, match_prob, Action.TRACKER_REJECTED, thresholds,
+        "acme.com", ["Acme Corp"],
+    )
     assert d.route == route
+
+
+@pytest.mark.parametrize(
+    ("domain", "names"),
+    [
+        ("acme.com", ["Acme Corp"]),
+        ("acmecorp.com", ["Acme Corp"]),
+        ("careers.globex.com", ["Globex"]),
+        ("mail.acme.co.uk", ["Acme Ltd"]),
+        ("talentbridge.com", ["Hooli", "TalentBridge"]),
+        ("stark-industries.com", ["Stark Industries"]),
+    ],
+)
+def test_sender_matches_company_or_agency(domain, names) -> None:
+    assert sender_matches(domain, names)
+
+
+@pytest.mark.parametrize(
+    ("domain", "names"),
+    [
+        ("hooli-careers.example", ["Hooli"]),
+        ("h\u043e\u043eli.com", ["Hooli"]),
+        ("hooli.com.evil.example", ["Hooli"]),
+        ("ats-mail.example", ["Hooli"]),
+        ("acme.com", []),
+        ("", ["Acme"]),
+    ],
+)
+def test_sender_mismatch(domain, names) -> None:
+    assert not sender_matches(domain, names)
+
+
+def test_rejection_from_other_sender_needs_approval() -> None:
+    d = decide("rejection", 0.999, 6, 0.999, Action.TRACKER_REJECTED, T, "hooli-careers.example", ["Hooli"])
+    assert d.route == "approval"
+    assert "hooli-careers.example" in d.reason
+
+
+def test_label_ignores_sender() -> None:
+    assert decide("rejection", 0.5, None, 0.0, Action.LABEL, T, "anything.example").route == "auto"

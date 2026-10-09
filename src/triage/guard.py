@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import re
+import string
+from collections.abc import Sequence
 from enum import StrEnum
 from typing import Literal
 
@@ -71,6 +74,55 @@ def check_allowed(category: str, action: Action) -> None:
         raise GuardError(f"action {action.value!r} not allowed for category {category!r}")
 
 
+# Legal-form words a company's domain usually leaves out (Acme Corp at acme.com).
+LEGAL_SUFFIXES = {
+    "co",
+    "company",
+    "corp",
+    "corporation",
+    "gmbh",
+    "group",
+    "inc",
+    "incorporated",
+    "limited",
+    "llc",
+    "ltd",
+    "plc",
+}
+# Public suffixes of two labels, so careers.acme.co.uk resolves to "acme".
+TWO_LABEL_SUFFIXES = {"ac.uk", "co.in", "co.jp", "co.nz", "co.uk", "com.au", "com.br", "org.uk"}
+_KEY_CHARS = set(string.ascii_lowercase + string.digits)
+
+
+def _key(text: str) -> str:
+    return "".join(c for c in text.lower() if c in _KEY_CHARS)
+
+
+def _domain_label(domain: str) -> str:
+    labels = domain.lower().strip(".").split(".")
+    if len(labels) >= 3 and ".".join(labels[-2:]) in TWO_LABEL_SUFFIXES:
+        return labels[-3]
+    return labels[-2] if len(labels) >= 2 else ""
+
+
+def _name_keys(name: str) -> set[str]:
+    words = re.findall(r"\w+", name.lower())
+    core = " ".join(w for w in words if w not in LEGAL_SUFFIXES)
+    return {_key(name), _key(core)} - {""}
+
+
+def sender_matches(sender_domain: str, names: Sequence[str]) -> bool:
+    """Whether the sender's registrable domain is one of ``names`` (company or agency).
+
+    The domain label must equal a name exactly, ignoring case, spaces, punctuation and
+    legal suffixes. Lookalikes (hooli-careers.example) and non-ASCII labels never match.
+    """
+    label = _domain_label(sender_domain)
+    if not label or not label.isascii():
+        return False
+    return any(_key(label) in _name_keys(name) for name in names)
+
+
 def decide(
     category: str,
     category_prob: float,
@@ -78,13 +130,23 @@ def decide(
     match_prob: float,
     action: Action,
     thresholds: GuardThresholds,
+    sender_domain: str = "",
+    row_names: Sequence[str] = (),
 ) -> GuardDecision:
+    """Route ``action``; a threshold-gated action also needs the sender to be the matched
+    row's company or agency (``row_names``)."""
     check_allowed(category, action)
 
     if action in THRESHOLD_GATED_AUTO:
         if matched_id is None:
             return GuardDecision(
                 route="approval", reason="no matching tracker row; threshold gate not met"
+            )
+        if not sender_matches(sender_domain, row_names):
+            names = " / ".join(row_names) or "the matched row"
+            return GuardDecision(
+                route="approval",
+                reason=f"sender domain {sender_domain!r} is not {names}",
             )
         if category_prob >= thresholds.category and match_prob >= thresholds.match:
             return GuardDecision(route="auto", reason="thresholds met")
