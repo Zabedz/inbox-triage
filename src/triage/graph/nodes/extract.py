@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from triage.graph.state import State
 from triage.models.base import GenerativeModel
+from triage.prompting import data_block, sanitize
 
 FIELDS = [
     "company",
@@ -54,10 +55,10 @@ def _state_text(state: State) -> str:
 
 def build_extract(model: GenerativeModel) -> Callable[[State], dict[str, Any]]:
     def extract(state: State) -> dict[str, Any]:
-        text = _state_text(state).replace("<DATA", "").replace("</DATA", "")
+        text = sanitize(_state_text(state))
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": f"<DATA>\n{text}\n</DATA>"},
+            {"role": "user", "content": data_block(text)},
         ]
         result = model.generate(messages, Extraction)
         extracted: dict[str, str | None] = {}

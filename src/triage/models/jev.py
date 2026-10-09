@@ -21,7 +21,11 @@ class JevError(Exception):
 
 
 class JevAPIError(JevError):
-    """Non-retryable API error (4xx, malformed response)."""
+    """Non-retryable API error (4xx, malformed response); ``status`` is the HTTP code if any."""
+
+    def __init__(self, message: str, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
 
 
 class JevRetryableError(JevError):
@@ -86,7 +90,8 @@ class JevClient:
                 elapsed = time.monotonic() - started
                 if 400 <= resp.status_code < 500:
                     raise JevAPIError(
-                        f"Jev rejected request ({resp.status_code}): {resp.text[:200]}"
+                        f"Jev rejected request ({resp.status_code}): {resp.text[:200]}",
+                        status=resp.status_code,
                     )
                 if resp.status_code >= 500:
                     raise JevRetryableError(f"Jev server error ({resp.status_code})")

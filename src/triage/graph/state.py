@@ -31,5 +31,7 @@ class State(TypedDict, total=False):
 
     guard_decision: str
     reason: str
+    reviewed_action: str | None
+    verdict: str
 
     trail: list[dict[str, Any]]

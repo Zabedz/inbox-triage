@@ -13,7 +13,7 @@ from langgraph.types import RetryPolicy, interrupt
 from triage.graph.nodes.classify import build_classify
 from triage.graph.nodes.extract import build_extract
 from triage.graph.state import State
-from triage.guard import Action, GuardError, GuardThresholds, decide
+from triage.guard import Action, GuardError, GuardThresholds, check_allowed, decide
 from triage.models.base import DecisionModel, GenerativeModel
 from triage.redact import redact as redact_text
 
@@ -65,14 +65,18 @@ def propose_action(state: State) -> dict[str, Any]:
     return {"action": None, "action_prob": 0.0, "draft": None}
 
 
+def _action(value: str) -> Action:
+    try:
+        return Action(value)
+    except ValueError as exc:
+        raise GuardError(f"unknown action {value!r}") from exc
+
+
 def guard(state: State, thresholds: GuardThresholds) -> dict[str, Any]:
     action = state.get("action")
     if action is None:
         return {"guard_decision": "approval", "reason": "no action proposed"}
-    try:
-        resolved = Action(action)
-    except ValueError as exc:
-        raise GuardError(f"unknown action {action!r}") from exc
+    resolved = _action(action)
     decision = decide(
         category=state["category"],
         category_prob=state.get("category_probs", {}).get(state["category"], 0.0),
@@ -84,28 +88,57 @@ def guard(state: State, thresholds: GuardThresholds) -> dict[str, Any]:
     return {"guard_decision": decision.route, "reason": decision.reason}
 
 
+def _matched_row(state: State) -> str | None:
+    for candidate in state.get("candidates", []):
+        if candidate.get("id") == state.get("matched_id"):
+            return f"{candidate.get('company')} - {candidate.get('role')}"
+    return None
+
+
 def approval(state: State) -> dict[str, Any]:
+    """Interrupt for a human verdict; a missing or empty verdict applies nothing."""
     payload = {
         "email_id": state.get("email_id"),
+        "sender_domain": state.get("sender_domain"),
+        "subject": state.get("subject_text"),
         "category": state.get("category"),
         "category_probs": state.get("category_probs"),
         "matched_id": state.get("matched_id"),
+        "matched_row": _matched_row(state),
         "match_prob": state.get("match_prob"),
         "action": state.get("action"),
+        "action_prob": state.get("action_prob"),
         "draft": state.get("draft"),
         "reason": state.get("reason"),
     }
     decision = interrupt(payload)
-    if decision is None:
-        return {}
-    return {
-        "action": decision.get("action", state.get("action")),
-        "reason": decision.get("reason"),
-    }
+    if not isinstance(decision, dict):
+        return {"reviewed_action": None, "verdict": "no decision"}
+    verdict = str(decision.get("reason") or "no decision")
+    value = decision.get("action")
+    if value is None:
+        return {"reviewed_action": None, "verdict": verdict}
+    try:
+        action = _action(value)
+        check_allowed(state.get("category", "other"), action)
+    except GuardError as exc:
+        logger.warning("refused reviewed action for %s: %s", state.get("email_id"), exc)
+        return {"reviewed_action": None, "verdict": f"refused {value!r}"}
+    return {"reviewed_action": action.value, "verdict": verdict}
 
 
 def _route_after_guard(state: State) -> str:
     return state.get("guard_decision", "approval")
+
+
+def _route_after_approval(state: State) -> str:
+    return "apply" if state.get("reviewed_action") else "log"
+
+
+def _applied_action(state: State) -> str | None:
+    if state.get("guard_decision") == "approval":
+        return state.get("reviewed_action")
+    return state.get("action")
 
 
 def build_graph(
@@ -117,7 +150,7 @@ def build_graph(
     extract_model: GenerativeModel | None = None,
     match_node: Callable[[State], dict[str, Any]] | None = None,
     propose_action_node: Callable[[State], dict[str, Any]] | None = None,
-    apply_sink: Callable[[State], None] | None = None,
+    apply_sink: Callable[[Action, State], None] | None = None,
     log_sink: Callable[[dict[str, Any]], None] | None = None,
 ) -> Any:
     thresholds = thresholds or GuardThresholds()
@@ -135,14 +168,17 @@ def build_graph(
         extract_node = build_extract(extract_model)
 
     def _apply(state: State) -> dict[str, Any]:
+        action = _applied_action(state)
+        if action is None:
+            return {}
         logger.info(
             "applying action=%s for email=%s (%s)",
-            state.get("action"),
+            action,
             state.get("email_id"),
-            state.get("reason"),
+            state.get("verdict") or state.get("reason"),
         )
         if apply_sink is not None:
-            apply_sink(state)
+            apply_sink(_action(action), state)
         return {}
 
     def _log(state: State) -> dict[str, Any]:
@@ -153,8 +189,14 @@ def build_graph(
             "matched_id": state.get("matched_id"),
             "match_prob": state.get("match_prob"),
             "action": state.get("action"),
+            "action_prob": state.get("action_prob"),
+            "has_draft": bool(state.get("draft")),
             "guard_decision": state.get("guard_decision"),
             "reason": state.get("reason"),
+            "reviewed_action": state.get("reviewed_action"),
+            "verdict": state.get("verdict"),
+            "category_threshold": thresholds.category,
+            "match_threshold": thresholds.match,
         }
         trail = list(state.get("trail", []))
         trail.append(entry)
@@ -193,7 +235,9 @@ def build_graph(
         "guard", _route_after_guard, {"auto": "apply", "approval": "approval"}
     )
     graph.add_edge("apply", "log")
-    graph.add_edge("approval", "apply")
+    graph.add_conditional_edges(
+        "approval", _route_after_approval, {"apply": "apply", "log": "log"}
+    )
     graph.add_edge("log", END)
 
     return graph.compile(checkpointer=checkpointer)

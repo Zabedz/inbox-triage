@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from triage.graph.state import State
 from triage.guard import ACTION_DESCRIPTIONS, ALLOWED, Action
 from triage.models.base import DecisionModel, GenerativeModel, choice
+from triage.prompting import data_block
 
 
 class Draft(BaseModel):
@@ -50,10 +51,9 @@ def build_propose_action(
 
         draft: str | None = None
         if action == Action.REPLY_DRAFT.value and generative is not None:
-            text = _state_text(state).replace("<DATA", "").replace("</DATA", "")
             messages = [
                 {"role": "system", "content": DRAFT_SYSTEM},
-                {"role": "user", "content": f"<DATA>\n{text}\n</DATA>"},
+                {"role": "user", "content": data_block(_state_text(state))},
             ]
             result = generative.generate(messages, Draft)
             draft = f"{result.subject}\n\n{result.body}"

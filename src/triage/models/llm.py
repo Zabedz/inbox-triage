@@ -26,7 +26,11 @@ class GenerativeError(Exception):
 
 
 class GenerativeAPIError(GenerativeError):
-    """Non-retryable error (4xx, malformed response)."""
+    """Non-retryable error (4xx, malformed response); ``status`` is the HTTP code if any."""
+
+    def __init__(self, message: str, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
 
 
 class GenerativeRetryableError(GenerativeError):
@@ -60,7 +64,8 @@ def _post(
                 last = GenerativeRetryableError(f"LLM server error ({resp.status_code})")
             elif resp.status_code >= 400:
                 raise GenerativeAPIError(
-                    f"LLM rejected request ({resp.status_code}): {resp.text[:200]}"
+                    f"LLM rejected request ({resp.status_code}): {resp.text[:200]}",
+                    status=resp.status_code,
                 )
             else:
                 return resp

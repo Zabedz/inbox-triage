@@ -13,6 +13,7 @@ from triage.models.base import (
     Question,
     ScoreQuestion,
 )
+from triage.prompting import data_block
 
 logger = logging.getLogger("triage.models.decision_llm")
 
@@ -77,8 +78,7 @@ def _to_answers(raw: dict[str, LLMAnswer], questions: dict[str, Question]) -> di
 
 
 def _build_prompt(state: str, questions: dict[str, Question]) -> str:
-    sanitized = state.replace("<DATA", "").replace("</DATA", "")
-    lines = ["<DATA>", sanitized, "</DATA>", "", "Questions:"]
+    lines = [data_block(state), "", "Questions:"]
     for qid, question in questions.items():
         lines.append(f"- {qid}: {question.instructions}")
         if isinstance(question, ChoiceQuestion):

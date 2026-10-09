@@ -1,4 +1,4 @@
-"""Apply a Gmail label to a message (gmail.modify scope, no send)."""
+"""Apply a Gmail label to a message (gmail.modify)."""
 
 from __future__ import annotations
 

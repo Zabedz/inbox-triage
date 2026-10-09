@@ -51,3 +51,19 @@ def test_disallowed_action_raises() -> None:
 def test_unknown_category_raises() -> None:
     with pytest.raises(GuardError):
         decide("bogus", 0.99, 12, 0.99, Action.LABEL, T)
+
+
+@pytest.mark.parametrize(
+    ("category_prob", "match_prob", "route"),
+    [
+        (0.99, 0.99, "auto"),
+        (0.989, 0.99, "approval"),
+        (0.99, 0.989, "approval"),
+        (0.999, 0.5, "approval"),
+        (0.5, 0.999, "approval"),
+    ],
+)
+def test_rejection_needs_both_thresholds(category_prob, match_prob, route) -> None:
+    thresholds = GuardThresholds(category=0.99, match=0.99)
+    d = decide("rejection", category_prob, 12, match_prob, Action.TRACKER_REJECTED, thresholds)
+    assert d.route == route

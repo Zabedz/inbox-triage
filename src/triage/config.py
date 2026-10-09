@@ -20,6 +20,12 @@ DEFAULT_GMAIL_TOKEN = "./data/gmail-token.json"  # noqa: S105
 
 DEFAULT_QUERY = "is:unread newer_than:7d"
 
+# Covers read and label changes. The scope also permits send; the code never calls it.
+GMAIL_MODIFY = "https://www.googleapis.com/auth/gmail.modify"
+
+# Guard thresholds below this would auto-apply on a coin flip.
+MIN_GUARD_THRESHOLD = 0.5
+
 
 @dataclass(frozen=True)
 class JevConfig:
@@ -67,6 +73,17 @@ def _path(name: str, default: str) -> Path:
     return Path(os.environ.get(name, default)).expanduser()
 
 
+def _threshold(name: str) -> float:
+    raw = os.environ.get(name, "0.99")
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name}={raw!r} is not a number") from exc
+    if not MIN_GUARD_THRESHOLD <= value <= 1.0:
+        raise ValueError(f"{name}={raw} outside [{MIN_GUARD_THRESHOLD}, 1.0]")
+    return value
+
+
 def load(env_path: str | Path | None = None) -> Config:
     if env_path is not None:
         load_dotenv(env_path)
@@ -94,10 +111,7 @@ def load(env_path: str | Path | None = None) -> Config:
 
     gmail = GmailConfig(
         token_path=_path("GMAIL_TOKEN", DEFAULT_GMAIL_TOKEN),
-        scopes=(
-            "https://www.googleapis.com/auth/gmail.readonly",
-            "https://www.googleapis.com/auth/gmail.modify",
-        ),
+        scopes=(GMAIL_MODIFY,),
         query=os.environ.get("GMAIL_QUERY", DEFAULT_QUERY),
     )
 
@@ -115,8 +129,8 @@ def load(env_path: str | Path | None = None) -> Config:
             for name in os.environ.get("CANDIDATE_NAMES", "").split(",")
             if name.strip()
         ),
-        guard_category_threshold=float(os.environ.get("GUARD_CATEGORY_THRESHOLD", "0.99")),
-        guard_match_threshold=float(os.environ.get("GUARD_MATCH_THRESHOLD", "0.99")),
+        guard_category_threshold=_threshold("GUARD_CATEGORY_THRESHOLD"),
+        guard_match_threshold=_threshold("GUARD_MATCH_THRESHOLD"),
         agent_db=data_dir / "agent.db",
         checkpoints_db=data_dir / "checkpoints.db",
     )

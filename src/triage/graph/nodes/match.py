@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from triage.graph.state import State
 from triage.models.base import DecisionModel, GenerativeModel, choice
+from triage.prompting import data_block
 from triage.tracker.db import TrackerDB
 from triage.tracker.schema import Application
 
@@ -81,10 +82,6 @@ def _run_tool(tracker: TrackerDB, step: MatchStep, pool: dict[int, Application])
     return ""
 
 
-def _sanitize(value: str) -> str:
-    return value.replace("<DATA", "").replace("</DATA", "")
-
-
 def build_match(
     tracker: TrackerDB,
     llm: GenerativeModel,
@@ -94,12 +91,12 @@ def build_match(
     def match(state: State) -> dict[str, Any]:
         pool: dict[int, Application] = {}
         block = (
-            f"Subject: {_sanitize(state.get('subject_text', ''))}\n"
-            f"Sender domain: {_sanitize(state.get('sender_domain', ''))}\n"
-            f"Body: {_sanitize(state.get('body_text', ''))}\n"
+            f"Subject: {state.get('subject_text', '')}\n"
+            f"Sender domain: {state.get('sender_domain', '')}\n"
+            f"Body: {state.get('body_text', '')}\n"
             f"Extracted fields: {json.dumps(state.get('extracted', {}))}"
         )
-        context = [f"<DATA>\n{block}\n</DATA>"]
+        context = [data_block(block)]
         for _ in range(max_tool_calls):
             messages = [
                 {"role": "system", "content": SYSTEM_PROMPT},

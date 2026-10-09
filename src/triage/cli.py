@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 from collections.abc import Callable
 from pathlib import Path
 
@@ -67,7 +68,7 @@ def build_parser() -> argparse.ArgumentParser:
     snap = sub.add_parser("snapshot", help="copy tracker into local SQLite")
     snap.set_defaults(func=_cmd_snapshot)
 
-    auth_p = sub.add_parser("auth", help="authorise Gmail (read + label, no send)")
+    auth_p = sub.add_parser("auth", help="authorise Gmail (gmail.modify)")
     auth_p.set_defaults(func=_cmd_auth)
 
     ing = sub.add_parser("ingest", help="list/fetch job-related Gmail")
@@ -91,6 +92,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+    )
     func: Callable[[argparse.Namespace], int] = args.func
     return func(args)
 

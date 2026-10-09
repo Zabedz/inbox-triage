@@ -8,6 +8,28 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+# An email that fails this many runs is left for manual triage.
+MAX_ATTEMPTS = 3
+
+DECISION_COLUMNS = (
+    "email_id",
+    "category",
+    "category_probs",
+    "matched_id",
+    "match_prob",
+    "action",
+    "action_prob",
+    "has_draft",
+    "guard_decision",
+    "reason",
+    "reviewed_action",
+    "verdict",
+    "category_threshold",
+    "match_threshold",
+    "decision_backend",
+    "llm_model",
+)
+
 DECISIONS_DDL = """
 CREATE TABLE IF NOT EXISTS decisions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -17,8 +39,16 @@ CREATE TABLE IF NOT EXISTS decisions (
     matched_id INTEGER,
     match_prob REAL,
     action TEXT,
+    action_prob REAL,
+    has_draft INTEGER,
     guard_decision TEXT,
     reason TEXT,
+    reviewed_action TEXT,
+    verdict TEXT,
+    category_threshold REAL,
+    match_threshold REAL,
+    decision_backend TEXT,
+    llm_model TEXT,
     timestamp TEXT NOT NULL
 )
 """
@@ -37,40 +67,59 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _connect(path: str | Path) -> sqlite3.Connection:
+    # Graph nodes may run off the calling thread.
+    return sqlite3.connect(str(path), check_same_thread=False)
+
+
 class DecisionLog:
-    def __init__(self, path: str | Path) -> None:
-        self._conn = sqlite3.connect(str(path))
+    def __init__(self, path: str | Path, context: dict[str, Any] | None = None) -> None:
+        """``context`` holds fields fixed for a run (backend, model) merged into every row."""
+        self._conn = _connect(path)
         self._conn.execute(DECISIONS_DDL)
+        self._add_missing_columns()
+        self._context = context or {}
+
+    def _add_missing_columns(self) -> None:
+        """Bring a table created by an older schema up to ``DECISION_COLUMNS``."""
+        present = {row[1] for row in self._conn.execute("PRAGMA table_info(decisions)")}
+        for column in DECISION_COLUMNS:
+            if column not in present:
+                self._conn.execute(f"ALTER TABLE decisions ADD COLUMN {column}")
+        self._conn.commit()
 
     def close(self) -> None:
         self._conn.close()
 
     def log(self, entry: dict[str, Any]) -> None:
+        row = {**self._context, **entry}
+        row["category_probs"] = json.dumps(row.get("category_probs") or {})
+        values = [row.get(col) for col in DECISION_COLUMNS]
+        placeholders = ",".join("?" * (len(DECISION_COLUMNS) + 1))
         self._conn.execute(
-            "INSERT INTO decisions (email_id, category, category_probs, matched_id, "
-            "match_prob, action, guard_decision, reason, timestamp) VALUES (?,?,?,?,?,?,?,?,?)",
-            (
-                entry.get("email_id"),
-                entry.get("category"),
-                json.dumps(entry.get("category_probs", {})),
-                entry.get("matched_id"),
-                entry.get("match_prob"),
-                entry.get("action"),
-                entry.get("guard_decision"),
-                entry.get("reason"),
-                _now(),
-            ),
+            f"INSERT INTO decisions ({','.join(DECISION_COLUMNS)}, timestamp) "  # noqa: S608
+            f"VALUES ({placeholders})",
+            (*values, _now()),
         )
         self._conn.commit()
 
-    def has(self, email_id: str) -> bool:
-        cur = self._conn.execute("SELECT 1 FROM decisions WHERE email_id = ? LIMIT 1", (email_id,))
-        return cur.fetchone() is not None
+    def log_error(self, email_id: str, error: str) -> None:
+        self.log({"email_id": email_id, "guard_decision": "error", "reason": error})
+
+    def is_done(self, email_id: str) -> bool:
+        """True once the email has a decision or has failed ``MAX_ATTEMPTS`` runs."""
+        cur = self._conn.execute(
+            "SELECT SUM(guard_decision IS NOT 'error'), SUM(guard_decision IS 'error') "
+            "FROM decisions WHERE email_id = ?",
+            (email_id,),
+        )
+        decided, errors = cur.fetchone()
+        return bool(decided) or (errors or 0) >= MAX_ATTEMPTS
 
 
 class PendingApprovals:
     def __init__(self, path: str | Path) -> None:
-        self._conn = sqlite3.connect(str(path))
+        self._conn = _connect(path)
         self._conn.execute(PENDING_DDL)
 
     def close(self) -> None:

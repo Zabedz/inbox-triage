@@ -60,7 +60,15 @@ class GuardDecision(BaseModel):
 
 
 class GuardError(ValueError):
-    """An action outside the category's allowed set — a programming error, not email data."""
+    """An action outside the category's allowed set; a programming error."""
+
+
+def check_allowed(category: str, action: Action) -> None:
+    allowed = ALLOWED.get(category)
+    if allowed is None:
+        raise GuardError(f"unknown category {category!r}")
+    if action not in allowed:
+        raise GuardError(f"action {action.value!r} not allowed for category {category!r}")
 
 
 def decide(
@@ -71,11 +79,7 @@ def decide(
     action: Action,
     thresholds: GuardThresholds,
 ) -> GuardDecision:
-    allowed = ALLOWED.get(category)
-    if allowed is None:
-        raise GuardError(f"unknown category {category!r}")
-    if action not in allowed:
-        raise GuardError(f"action {action.value!r} not allowed for category {category!r}")
+    check_allowed(category, action)
 
     if action in THRESHOLD_GATED_AUTO:
         if matched_id is None:

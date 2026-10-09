@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
+from typing import Any
 
 from triage.config import Config
 from triage.gmail.client import Email, GmailClient
@@ -14,29 +15,41 @@ logger = logging.getLogger("triage.gmail.ingest")
 CLIENT_SECRETS = "client_secrets.json"
 
 
-def build_service(cfg: Config) -> object:
-    """Build a Gmail service (read + label) using an installed-app OAuth flow.
+class GmailAuthError(RuntimeError):
+    """No usable token and an interactive sign-in is not allowed."""
+
+
+def load_token(token_path: Path, scopes: tuple[str, ...]) -> Any:
+    """Load saved credentials, or None when absent or missing a required scope."""
+    from google.oauth2.credentials import Credentials
+
+    if not token_path.exists():
+        return None
+    # Load without requested scopes so has_scopes checks what was actually granted.
+    creds = Credentials.from_authorized_user_file(str(token_path))  # type: ignore[no-untyped-call]
+    return creds if creds.has_scopes(scopes) else None
+
+
+def build_service(cfg: Config, interactive: bool = True) -> object:
+    """Build a Gmail service using an installed-app OAuth flow.
 
     Reads `client_secrets.json` from the data dir and stores the refreshed token at
-    `cfg.gmail.token_path`. A token missing a configured scope is re-authorised.
-    Never requests a send scope.
+    `cfg.gmail.token_path`. A token missing a configured scope is re-authorised, or
+    raises `GmailAuthError` when ``interactive`` is False.
     """
     from google.auth.transport.requests import Request
-    from google.oauth2.credentials import Credentials
     from google_auth_oauthlib.flow import InstalledAppFlow
     from googleapiclient.discovery import build
 
     token_path: Path = cfg.gmail.token_path
-    creds: Credentials | None = None
-    if token_path.exists():
-        creds = Credentials.from_authorized_user_file(  # type: ignore[no-untyped-call]
-            str(token_path), cfg.gmail.scopes
-        )
-        if not creds.has_scopes(cfg.gmail.scopes):
-            creds = None
+    creds = load_token(token_path, cfg.gmail.scopes)
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())  # type: ignore[no-untyped-call]
+            creds.refresh(Request())
+        elif not interactive:
+            raise GmailAuthError(
+                f"token at {token_path} is missing or lacks {cfg.gmail.scopes}; run triage auth"
+            )
         else:
             secrets = cfg.tracker.data_dir / CLIENT_SECRETS
             if not secrets.exists():
