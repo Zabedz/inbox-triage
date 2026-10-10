@@ -12,7 +12,9 @@ from pathlib import Path
 from typing import Any
 
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
+from evals.providers.metering import Ledger, MeteredDecision, MeteredGenerative, run_timed
 from evals.providers.rules import RulesDecisionModel, RulesGenerativeModel
 from triage.agent import assemble
 from triage.config import load
@@ -68,6 +70,7 @@ class _FakeMatchDecision:
 _synthetic_db: TrackerDB | None = None
 
 FILLER = "This paragraph is filler that makes the email long. "
+SERDE = JsonPlusSerializer(allowed_msgpack_modules=[("triage.gmail.client", "Email")])
 
 
 def _synthetic_tracker() -> TrackerDB:
@@ -152,10 +155,54 @@ def _thresholds(config: dict[str, Any]) -> GuardThresholds:
     )
 
 
+def _skip_redaction(state: State) -> dict[str, Any]:
+    email = state["email"]
+    return {"body_text": email.body_plain, "subject_text": email.subject}
+
+
+def _names(config: dict[str, Any], default: tuple[str, ...]) -> tuple[str, ...]:
+    if "candidate_names" not in config:
+        return default
+    return tuple(n.strip() for n in str(config["candidate_names"]).split(",") if n.strip())
+
+
+def _email(vars_: dict[str, Any]) -> Email:
+    body = vars_.get("body", "")
+    if padding := int(vars_.get("body_padding") or 0):
+        body = (FILLER * (padding // len(FILLER) + 1))[:padding] + "\n\n" + body
+    return Email(
+        id=str(vars_.get("email_id", "eval")),
+        thread_id="eval",
+        from_=vars_.get("from_", ""),
+        to="",
+        subject=vars_.get("subject", ""),
+        date=None,
+        body_plain=body,
+        body_html=vars_.get("body_html", ""),
+        snippet="",
+    )
+
+
 def _call_e2e(
     kind: str, vars_: dict[str, Any], config: dict[str, Any], names: tuple[str, ...]
 ) -> dict[str, Any]:
-    tracker = _synthetic_tracker()
+    real_tracker = config.get("tracker") == "real"
+    tracker = TrackerDB(load().tracker.db) if real_tracker else _synthetic_tracker()
+    try:
+        return _run_e2e(kind, vars_, config, names, tracker)
+    finally:
+        if real_tracker:
+            tracker.close()
+
+
+def _run_e2e(
+    kind: str,
+    vars_: dict[str, Any],
+    config: dict[str, Any],
+    names: tuple[str, ...],
+    tracker: TrackerDB,
+) -> dict[str, Any]:
+    ledger = Ledger()
     decision: Any
     generative: Any
     model = kind
@@ -170,6 +217,8 @@ def _call_e2e(
         generative = build_generative_model(cfg)
         model = f"{kind}+{cfg.llm_provider}:{cfg.llm_model}"
     thresholds = _thresholds(config)
+    redacted = config.get("redact", True) is not False
+    redact_names = _names(config, names)
 
     applied: list[str] = []
 
@@ -177,36 +226,31 @@ def _call_e2e(
         applied.append(action.value)
 
     graph = assemble(
-        decision=decision,
-        generative=generative,
+        decision=MeteredDecision(decision, ledger),
+        generative=MeteredGenerative(generative, ledger),
         tracker=tracker,
         thresholds=thresholds,
         apply_sink=record,
         log_sink=None,
-        checkpointer=InMemorySaver(),
-        redact_names=names,
+        checkpointer=InMemorySaver(serde=SERDE),
+        redact_names=redact_names,
+        nodes=None if redacted else {"redact": _skip_redaction},
     )
-    body = vars_.get("body", "")
-    if padding := int(vars_.get("body_padding") or 0):
-        body = (FILLER * (padding // len(FILLER) + 1))[:padding] + "\n\n" + body
-    email = Email(
-        id=str(vars_.get("email_id", "eval")),
-        thread_id="eval",
-        from_=vars_.get("from_", ""),
-        to="",
-        subject=vars_.get("subject", ""),
-        date=None,
-        body_plain=body,
-        body_html=vars_.get("body_html", ""),
-        snippet="",
+    email = _email(vars_)
+    # Spans redaction would mask, whether or not this run masks them; pairs raw with redacted.
+    masked = sum(
+        len(redact(text, names=redact_names).replacements)
+        for text in (email.subject, email.body_plain)
     )
     thread = {"configurable": {"thread_id": f"eval-{uuid.uuid4().hex}"}}
-    result = graph.invoke({"email_id": email.id, "email": email}, config=thread)
+    timings, node_tokens = run_timed(graph, {"email_id": email.id, "email": email}, thread, ledger)
+    result = graph.get_state(thread).values
     category = result.get("category")
     probs = result.get("category_probs", {})
     output = {
         "category": category,
         "category_prob": probs.get(category, 0.0),
+        "extracted": result.get("extracted", {}),
         "matched_id": result.get("matched_id"),
         "match_prob": result.get("match_prob", 0.0),
         "action": result.get("action"),
@@ -216,9 +260,16 @@ def _call_e2e(
         "draft": result.get("draft"),
         "thresholds": [thresholds.category, thresholds.match],
         "model": model,
+        "redacted": redacted,
+        "masked_spans": masked,
+        "timings_ms": timings,
+        "node_tokens": node_tokens,
+        "tokens": ledger.totals,
     }
     named_scores = {f"p_{option}": prob for option, prob in probs.items()}
-    return {"output": json.dumps(output), "namedScores": named_scores}
+    tokens_in, tokens_out = ledger.tokens()
+    usage = {"prompt": tokens_in, "completion": tokens_out, "total": tokens_in + tokens_out}
+    return {"output": json.dumps(output), "namedScores": named_scores, "tokenUsage": usage}
 
 
 def call_api(prompt: str, options: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:

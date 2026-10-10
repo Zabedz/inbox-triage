@@ -8,6 +8,7 @@ from triage.models.base import (
     GenerativeModel,
     Question,
     ScoreQuestion,
+    Usage,
     choice,
     score,
 )
@@ -19,7 +20,6 @@ from triage.models.jev import (
     JevError,
     JevResponse,
     JevRetryableError,
-    JevUsage,
 )
 from triage.models.llm import (
     AnthropicGenerativeModel,
@@ -50,6 +50,7 @@ __all__ = [
     "GenerativeModel",
     "Question",
     "ScoreQuestion",
+    "Usage",
     "choice",
     "score",
     "JevAPIError",
@@ -58,7 +59,6 @@ __all__ = [
     "JevError",
     "JevRetryableError",
     "JevResponse",
-    "JevUsage",
     "LLMDecisionModel",
     "AnthropicGenerativeModel",
     "ZenGenerativeModel",

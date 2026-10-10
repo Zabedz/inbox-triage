@@ -12,6 +12,7 @@ from triage.gmail.ingest import auth, ingest
 from triage.label_cli import label, load_emails
 from triage.review import review
 from triage.run import run
+from triage.stats import render, stats
 from triage.tracker.db import TrackerDB
 from triage.tracker.snapshot import snapshot
 
@@ -61,6 +62,16 @@ def _cmd_review(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_stats(args: argparse.Namespace) -> int:
+    cfg = load()
+    summary = stats(cfg.agent_db, days=args.days)
+    if not summary["emails"] and not summary["queued"] and not summary["error_rows"]:
+        print(f"no decisions in {cfg.agent_db}; run triage run first")
+        return 1
+    print(render(summary))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="triage")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -86,6 +97,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     rev_p = sub.add_parser("review", help="review pending approvals")
     rev_p.set_defaults(func=_cmd_review)
+
+    stats_p = sub.add_parser("stats", help="summarise real use from the decision log")
+    stats_p.add_argument("--days", type=int, help="only decisions logged in the last N days")
+    stats_p.set_defaults(func=_cmd_stats)
 
     return parser
 

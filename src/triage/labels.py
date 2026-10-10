@@ -51,6 +51,8 @@ class LabeledEmail(BaseModel):
     extracted: ExtractedFields
     matched_tracker_id: int | None
     action: Action | None
+    # ISO date the email was received; splits the real set into calibration and test.
+    date: str | None = None
 
 
 DEFAULT_ACTION: dict[Category, Action | None] = {

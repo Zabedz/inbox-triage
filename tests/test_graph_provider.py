@@ -81,3 +81,25 @@ def test_e2e_real_model_without_llm_provider_refuses(synthetic_tracker, monkeypa
     monkeypatch.setenv("LLM_PROVIDER", "")
     with pytest.raises(ValueError, match="needs LLM_PROVIDER"):
         call_api("", {"config": {"task": "e2e", "model": "jev"}}, {"vars": {"body": "x"}})
+
+
+def test_e2e_reports_timings_and_redaction_mode(synthetic_tracker) -> None:
+    vars_ = {"email_id": "e3", "from_": "hr@globex.com", "subject": "s", "body": "Hi Jordan Lee, unfortunately no."}
+    redacted = json.loads(
+        call_api("", {"config": {"task": "e2e", "model": "rules", "candidate_names": "Jordan Lee"}}, {"vars": vars_})["output"]
+    )
+    raw = json.loads(
+        call_api("", {"config": {"task": "e2e", "model": "rules", "redact": False}}, {"vars": vars_})["output"]
+    )
+
+    assert redacted["redacted"] is True and raw["redacted"] is False
+    assert {"redact", "classify", "guard"} <= set(redacted["timings_ms"])
+    assert redacted["tokens"]["decision"]["calls"] >= 2
+
+
+def test_skip_redaction_keeps_raw_text() -> None:
+    from triage.gmail.client import Email
+
+    email = Email(id="e", thread_id="t", from_="a@b.com", to="", subject="Hi Jordan", date=None,
+                  body_plain="Call 020 7946 0123", body_html="", snippet="")
+    assert graph_provider._skip_redaction({"email": email}) == {"body_text": "Call 020 7946 0123", "subject_text": "Hi Jordan"}

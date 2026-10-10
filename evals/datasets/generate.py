@@ -77,6 +77,10 @@ TRACKER: list[TrackerRow] = [
 ]
 
 RECRUITERS = ["Alex Morgan", "Sam Rivera", "Priya Patel"]
+# Fictional candidate; evals pass it as a redaction name to measure redaction cost.
+CANDIDATE = "Jordan Lee"
+# Ofcom drama-range number, reserved for fiction.
+RECRUITER_PHONE = "+44 20 7946 0123"
 AGENCIES = ["TalentBridge", "TechRecruit", "Raven Talent"]
 
 
@@ -143,7 +147,8 @@ def _interview_invite(rng: random.Random, i: int) -> LabeledEmail:
     company, role, req = row["company"], row["role"], row["req"]
     day = rng.randint(10, 28)
     body = (
-        f"Hello,\n\nWe would like to invite you to interview for the {role} position at "
+        f"Hello {CANDIDATE},\n\nWe would like to invite you to interview for the {role} "
+        f"position at "
         f"{company} (req {req}). The interview will be held on 2026-10-{day:02d} at 14:00 GMT. "
         "Please reply with your availability and any questions.\n\nBest,\nRecruiting Team"
     )
@@ -164,7 +169,8 @@ def _interview_reschedule(rng: random.Random, i: int) -> LabeledEmail:
     row = _row("Umbrella", "Machine Learning Engineer")
     company, role = row["company"], row["role"]
     body = (
-        f"Hi,\n\nWe need to reschedule your interview for the {role} role at {company}. "
+        f"Hi {CANDIDATE.split()[0]},\n\nWe need to reschedule your interview for the {role} "
+        f"role at {company}. "
         "The new time is 2026-10-15 at 10:30 GMT (previously 09:00). Apologies for the "
         "inconvenience.\n\nThanks,\nScheduling"
     )
@@ -205,7 +211,8 @@ def _recruiter_outreach(rng: random.Random, i: int) -> LabeledEmail:
     body = (
         f"Hi,\n\nI'm {recruiter}, a recruiter at {agency}. I came across your profile and "
         f"wanted to reach out about a {role} opportunity with one of our clients. Would you "
-        "be open to a quick chat this week?\n\nThanks,\n" + recruiter
+        f"be open to a quick chat this week? You can reach me on {RECRUITER_PHONE}.\n\nThanks,\n"
+        + recruiter
     )
     return _email(
         "recruiter_outreach", i, None,

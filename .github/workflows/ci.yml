@@ -51,6 +51,8 @@ jobs:
       - run: npm ci
       - name: e2e and red team (rules baseline, no keys)
         run: sh evals/ci.sh rules
+      - name: README results rows match the rules run
+        run: PYTHONPATH=. python -m evals.summary --check README.md
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -66,7 +68,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - id: key
-        run: echo "present=${{ secrets.OPENCODE_API_KEY != '' }}" >> "$GITHUB_OUTPUT"
+        run: echo "present=${{ secrets.OPENCODE_API_KEY != '' && vars.LLM_PROVIDER != '' }}" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.key.outputs.present == 'true'
         with:

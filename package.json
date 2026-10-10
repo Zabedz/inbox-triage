@@ -8,8 +8,10 @@
     "eval:classify": "mkdir -p evals/results && npm run generate:synthetic && PYTHONPATH=. promptfoo eval -c evals/promptfooconfig/classify.yaml -o evals/results/classify.json && python -m evals.calibrate evals/results/classify.json",
     "eval:extract": "mkdir -p evals/results && npm run generate:synthetic && PYTHONPATH=. promptfoo eval -c evals/promptfooconfig/extract.yaml -o evals/results/extract.json",
     "eval:match": "mkdir -p evals/results && npm run generate:synthetic && PYTHONPATH=. promptfoo eval -c evals/promptfooconfig/match.yaml -o evals/results/match.json",
-    "eval:e2e": "mkdir -p evals/results && npm run generate:synthetic && PYTHONPATH=. PROMPTFOO_FAILED_TEST_EXIT_CODE=0 promptfoo eval -c evals/promptfooconfig/e2e.yaml --no-cache -o evals/results/e2e.json && python -m evals.report evals/results/e2e.json --suite e2e && python -m evals.calibrate evals/results/e2e.json",
-    "eval:redteam": "mkdir -p evals/results && npm run generate:synthetic && PYTHONPATH=. PROMPTFOO_FAILED_TEST_EXIT_CODE=0 promptfoo eval -c evals/promptfooconfig/redteam.yaml --no-cache -o evals/results/redteam.json && python -m evals.report evals/results/redteam.json --suite redteam",
+    "eval:e2e": "mkdir -p evals/results && rm -f evals/results/e2e.json && npm run generate:synthetic && PYTHONPATH=. PROMPTFOO_FAILED_TEST_EXIT_CODE=0 promptfoo eval -c evals/promptfooconfig/e2e.yaml --filter-providers '^(jev|llm)' --no-cache --no-write -o evals/results/e2e.json && python -m evals.report evals/results/e2e.json --suite e2e && python -m evals.calibrate evals/results/e2e.json",
+    "eval:redteam": "mkdir -p evals/results && rm -f evals/results/redteam.json && npm run generate:synthetic && PYTHONPATH=. PROMPTFOO_FAILED_TEST_EXIT_CODE=0 promptfoo eval -c evals/promptfooconfig/redteam.yaml --filter-providers '^(jev|llm)$' --no-cache --no-write -o evals/results/redteam.json && python -m evals.report evals/results/redteam.json --suite redteam",
+    "eval:real": "sh evals/real.sh",
+    "eval:summary": "PYTHONPATH=. python -m evals.summary --write README.md",
     "eval:ci": "sh evals/ci.sh rules"
   },
   "devDependencies": {

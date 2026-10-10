@@ -142,3 +142,11 @@ def test_serializes_score_question() -> None:
         "instructions": "How urgent?",
         "criteria": ["low", "high"],
     }
+
+
+@pytest.mark.parametrize("usage", [None, "n/a", {"input_tokens": None, "output_tokens": 5}])
+def test_malformed_usage_reads_as_zero(usage) -> None:
+    from triage.models.jev import JevResponse
+
+    response = JevResponse.model_validate({"model": "jev-1.13", "answers": {}, "usage": usage})
+    assert response.usage.input_tokens == 0

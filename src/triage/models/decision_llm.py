@@ -12,6 +12,7 @@ from triage.models.base import (
     GenerativeModel,
     Question,
     ScoreQuestion,
+    Usage,
 )
 from triage.prompting import data_block
 
@@ -99,6 +100,11 @@ class LLMDecisionModel:
 
     def __init__(self, generative: GenerativeModel) -> None:
         self._generative = generative
+
+    @property
+    def last_usage(self) -> Usage | None:
+        usage: Usage | None = getattr(self._generative, "last_usage", None)
+        return usage
 
     def decide(self, state: str, questions: dict[str, Question]) -> dict[str, Answer]:
         messages = [

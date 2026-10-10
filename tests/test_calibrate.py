@@ -5,10 +5,12 @@ import json
 import pytest
 
 from evals.calibrate import (
+    _iso_date,
     brier,
     ece,
     guard_lines,
     load_promptfoo_results,
+    out_of_sample,
     recommend_guard_thresholds,
     recommend_threshold,
     reliability,
@@ -134,3 +136,28 @@ def test_printed_guard_thresholds_admit_exactly_the_bounded_rows() -> None:
     admitted = [r for r in rows if r[0] >= cat and r[1] >= match]
     assert lines[0].startswith(f"admitted={len(admitted)} ")
     assert all(r[2] for r in admitted)
+
+
+def test_out_of_sample_scores_thresholds_on_later_mail() -> None:
+    train = [(0.99, 0.99, True, "2026-08-01")] * 60
+    test = [(0.995, 0.995, True, "2026-10-01")] * 9 + [(0.995, 0.995, False, "2026-10-02")]
+    lines = out_of_sample(train + test, "2026-09-01", target_failure=0.05)
+
+    assert lines[0] == "calibration rows before 2026-09-01: 60; test rows: 10; undated rows left out: 0"
+    assert lines[1].startswith("test at deployed 0.99/0.99: admitted=10 wrong=1 ")
+    assert "GUARD_CATEGORY_THRESHOLD=0.99" in lines
+    assert lines[-1].startswith("out-of-sample at recommended thresholds: admitted=10 wrong=1 ")
+
+
+def test_out_of_sample_without_enough_history_still_scores_the_test_split() -> None:
+    rows = [(0.995, 0.995, True, "2026-10-01"), (0.995, 0.995, True, "")]
+    lines = out_of_sample(rows, "2026-09-01", 0.05)
+    assert lines[0].endswith("undated rows left out: 1")
+    assert lines[1].startswith("test at deployed 0.99/0.99: admitted=1 wrong=0 ")
+    assert lines[-1] == "insufficient calibration evidence; keep 0.99"
+
+
+def test_split_date_must_be_iso() -> None:
+    with pytest.raises(ValueError):
+        _iso_date("2026-9-1")
+    assert _iso_date("2026-09-01") == "2026-09-01"

@@ -62,6 +62,13 @@ class Answer(BaseModel):
         return self.probabilities[best] if best is not None else 0.0
 
 
+class Usage(BaseModel):
+    """Tokens one model call consumed."""
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+
 class DecisionModel(Protocol):
     """Decide among structured options given a state string.
 

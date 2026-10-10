@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import UTC, date, datetime
 
 import pytest
 
@@ -103,3 +103,11 @@ def test_invalid_id_then_none_does_not_leak(
 
     record = json.loads(out.read_text().splitlines()[0])
     assert record["matched_tracker_id"] is None
+
+
+def test_label_records_received_date(tmp_path: pytest.TempPathFactory, tracker_db: TrackerDB) -> None:
+    out = tmp_path / "labels.jsonl"
+    email = _email("e1").model_copy(update={"date": datetime(2026, 9, 3, 14, 5, tzinfo=UTC)})
+    label([email], tracker_db, out, input_fn=_input("1", "", "", "", "", "", "", "", "", "", ""))
+
+    assert json.loads(out.read_text().splitlines()[0])["date"] == "2026-09-03"

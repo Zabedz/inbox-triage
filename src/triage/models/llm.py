@@ -12,6 +12,7 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from triage.config import Config
+from triage.models.base import Usage
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -35,6 +36,18 @@ class GenerativeAPIError(GenerativeError):
 
 class GenerativeRetryableError(GenerativeError):
     """Retryable error (5xx, timeout, connection)."""
+
+
+def _usage(data: Any, input_key: str, output_key: str) -> Usage:
+    """Token counts from a response body; malformed or missing fields count as zero."""
+    usage = data.get("usage") if isinstance(data, dict) else None
+    if not isinstance(usage, dict):
+        return Usage()
+    counts = []
+    for key in (input_key, output_key):
+        value = usage.get(key)
+        counts.append(value if isinstance(value, int) and value >= 0 else 0)
+    return Usage(input_tokens=counts[0], output_tokens=counts[1])
 
 
 def _split_messages(messages: list[dict[str, str]]) -> tuple[str, list[dict[str, str]]]:
@@ -98,11 +111,13 @@ class AnthropicGenerativeModel:
         self._model = model
         self._client = httpx.Client(timeout=timeout_s, transport=transport)
         self._backoff = backoff
+        self.last_usage: Usage | None = None
 
     def close(self) -> None:
         self._client.close()
 
     def generate(self, messages: list[dict[str, str]], schema: type[T]) -> T:
+        self.last_usage = None
         system, user = _split_messages(messages)
         body = {
             "model": self._model,
@@ -134,6 +149,7 @@ class AnthropicGenerativeModel:
             data = resp.json()
         except json.JSONDecodeError as exc:
             raise GenerativeAPIError(f"Anthropic returned non-JSON: {resp.text[:200]}") from exc
+        self.last_usage = _usage(data, "input_tokens", "output_tokens")
         for block in data.get("content", []):
             if block.get("type") == "tool_use" and block.get("name") == "respond":
                 return _validate(schema, block.get("input", {}))
@@ -159,11 +175,13 @@ class ZenGenerativeModel:
         self._client = httpx.Client(timeout=timeout_s, transport=transport)
         self._url = f"{base_url.rstrip('/')}/chat/completions"
         self._backoff = backoff
+        self.last_usage: Usage | None = None
 
     def close(self) -> None:
         self._client.close()
 
     def generate(self, messages: list[dict[str, str]], schema: type[T]) -> T:
+        self.last_usage = None
         system, user = _split_messages(messages)
         if system:
             user = [{"role": "system", "content": system}, *user]
@@ -180,7 +198,10 @@ class ZenGenerativeModel:
             self._client, self._url, json_body=body, headers=headers, backoff=self._backoff
         )
         try:
-            content = resp.json()["choices"][0]["message"]["content"]
+            data = resp.json()
+            # Billed even when the content below fails to parse.
+            self.last_usage = _usage(data, "prompt_tokens", "completion_tokens")
+            content = data["choices"][0]["message"]["content"]
             parsed = json.loads(content)
         except (json.JSONDecodeError, KeyError, IndexError, TypeError) as exc:
             raise GenerativeAPIError(f"LLM returned an invalid response: {exc}") from exc

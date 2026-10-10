@@ -7,6 +7,7 @@ import pytest
 from pydantic import BaseModel
 
 from triage.config import Config, GmailConfig, JevConfig, TrackerConfig
+from triage.models.base import Usage
 from triage.models.llm import (
     AnthropicGenerativeModel,
     GenerativeAPIError,
@@ -37,11 +38,13 @@ def test_anthropic_parses_tool_use() -> None:
                 "name": "respond",
                 "input": {"category": "rejection", "score": 0.9},
             }
-        ]
+        ],
+        "usage": {"input_tokens": 120, "output_tokens": 30},
     }
     client = _anthropic(mock_transport(response(200, body)))
     result = client.generate([{"role": "user", "content": "hi"}], Simple)
     assert result == Simple(category="rejection", score=0.9)
+    assert client.last_usage == Usage(input_tokens=120, output_tokens=30)
 
 
 def test_anthropic_raises_on_4xx() -> None:
@@ -69,13 +72,15 @@ def test_zen_parses_json_object() -> None:
     body = {
         "choices": [
             {"message": {"content": '{"category": "offer", "score": 1.0}'}}
-        ]
+        ],
+        "usage": {"prompt_tokens": 80, "completion_tokens": 12},
     }
     client = ZenGenerativeModel(
         "key", "m", "https://example.com", transport=mock_transport(response(200, body))
     )
     result = client.generate([{"role": "user", "content": "hi"}], Simple)
     assert result == Simple(category="offer", score=1.0)
+    assert client.last_usage == Usage(input_tokens=80, output_tokens=12)
 
 
 def test_build_generative_model_unknown_provider() -> None:
@@ -94,3 +99,23 @@ def test_build_generative_model_unknown_provider() -> None:
     )
     with pytest.raises(GenerativeError):
         build_generative_model(cfg)
+
+
+@pytest.mark.parametrize(
+    "usage", [None, "n/a", {"prompt_tokens": None, "completion_tokens": None}, {"prompt_tokens": -1}]
+)
+def test_zen_tolerates_malformed_usage(usage) -> None:
+    body = {"choices": [{"message": {"content": '{"category": "offer", "score": 1.0}'}}], "usage": usage}
+    client = ZenGenerativeModel("key", "m", "https://example.com", transport=mock_transport(response(200, body)))
+
+    assert client.generate([{"role": "user", "content": "hi"}], Simple) == Simple(category="offer", score=1.0)
+    assert client.last_usage == Usage()
+
+
+def test_zen_records_usage_when_content_is_not_json() -> None:
+    body = {"choices": [{"message": {"content": "not json"}}], "usage": {"prompt_tokens": 100, "completion_tokens": 7}}
+    client = ZenGenerativeModel("key", "m", "https://example.com", transport=mock_transport(response(200, body)))
+
+    with pytest.raises(GenerativeAPIError):
+        client.generate([{"role": "user", "content": "hi"}], Simple)
+    assert client.last_usage == Usage(input_tokens=100, output_tokens=7)

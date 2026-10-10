@@ -18,8 +18,8 @@ def result(provider: str, out: dict | None, vars_: dict, description: str = "", 
     }
 
 
-def out(category="rejection", matched=1, action="tracker_rejected", guard="auto", applied=None, draft=None):
-    return {
+def out(category="rejection", matched=1, action="tracker_rejected", guard="auto", applied=None, draft=None, **extra):
+    return {**extra,
         "category": category,
         "matched_id": matched,
         "action": action,
@@ -47,13 +47,14 @@ def test_e2e_metrics(tmp_path) -> None:
     ]
     metrics = metrics_by_provider(write(tmp_path, rows), "e2e")["rules"]
 
-    assert metrics["n"] == 3
+    assert metrics["n"] == 4
     assert metrics["errors"] == 1
-    assert metrics["match_accuracy"] == pytest.approx(2 / 3)
+    assert metrics["match_accuracy"] == pytest.approx(2 / 4)
+    assert metrics["category_accuracy"] == pytest.approx(3 / 4)
     assert metrics["auto_applied"] == 2
     assert metrics["silent_failure_rate"] == 0.5
-    assert metrics["approval_rate"] == pytest.approx(1 / 3)
-    assert metrics["latency_p95_ms"] == 40
+    assert metrics["approval_rate"] == pytest.approx(1 / 4)
+    assert metrics["class_f1"] == {"rejection": pytest.approx(0.857, abs=0.001)}
 
 
 def test_interview_reply_draft_counts_as_correct_action(tmp_path) -> None:
@@ -122,3 +123,20 @@ def test_main_fails_without_thresholds_or_rows(tmp_path, capsys) -> None:
     assert main([path, "--suite", "e2e", "--check", str(limits), "--provider", "rules"]) == 1
     empty = write(tmp_path, [])
     assert main([empty, "--suite", "e2e", "--check", str(limits), "--provider", "rules"]) == 1
+
+
+def test_field_accuracy_and_graph_latency(tmp_path) -> None:
+    vars_ = {**REJECTION, "extracted": {"company": "Acme Corp", "role": "AI Engineer"}}
+    timed = {"extracted": {"company": "acme corp", "role": None}, "timings_ms": {"a": 10.0, "b": 30.0},
+             "node_tokens": {"a": 0, "b": 120}}
+    metrics = metrics_by_provider(write(tmp_path, [result("jev", out(**timed), vars_)]), "e2e")["jev"]
+
+    assert metrics["field_accuracy"] == {"company": 1.0, "role": 0.0}
+    assert metrics["graph_latency_mean_ms"] == 40.0
+    assert metrics["nodes"]["b"] == {"mean_ms": 30.0, "p95_ms": 30.0, "mean_tokens": 120.0}
+
+
+def test_errored_email_counts_against_every_field(tmp_path) -> None:
+    vars_ = {**REJECTION, "extracted": {"company": "Acme Corp"}}
+    rows = [result("jev", out(extracted={"company": "Acme Corp"}), vars_), result("jev", None, vars_)]
+    assert metrics_by_provider(write(tmp_path, rows), "e2e")["jev"]["field_accuracy"] == {"company": 0.5}

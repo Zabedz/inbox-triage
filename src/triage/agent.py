@@ -88,10 +88,15 @@ def assemble(
     log_sink: Callable[[dict[str, Any]], None] | None,
     checkpointer: Any,
     redact_names: Sequence[str] = (),
+    nodes: dict[str, Callable[[State], dict[str, Any]]] | None = None,
 ) -> Any:
-    """Compile the agent graph from models and sinks; without an LLM, extract and match stub."""
+    """Compile the agent graph from models and sinks; without an LLM, extract and match stub.
+
+    ``nodes`` replaces graph nodes by name; the eval uses it to switch redaction off.
+    """
     match_node = build_match(tracker, generative, decision) if generative is not None else None
     return build_graph(
+        nodes=nodes,
         thresholds=thresholds,
         redact_names=redact_names,
         decision_model=decision,

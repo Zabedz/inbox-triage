@@ -118,6 +118,7 @@ def _label_one(
         extracted=ExtractedFields(**extracted),
         matched_tracker_id=matched_id,
         action=action,
+        date=email.date.date().isoformat() if email.date else None,
     )
 
 

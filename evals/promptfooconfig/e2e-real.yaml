@@ -1,0 +1,31 @@
+description: "e2e on the real labelled set (local only): real tracker, CANDIDATE_NAMES from .env"
+
+prompts:
+  - "{{body}}"
+
+providers:
+  - python:../providers/graph_provider.py:
+      id: jev-real
+      config: {task: e2e, model: jev, tracker: real}
+  - python:../providers/graph_provider.py:
+      id: llm-real
+      config: {task: e2e, model: llm, tracker: real}
+
+# Written by evals/real.sh from data/labels.jsonl; results stay in data/. Ids differ from e2e.yaml
+# to keep real numbers out of the synthetic README tables.
+tests: ../../data/labels.promptfoo.jsonl
+
+defaultTest:
+  assert:
+    - type: python
+      value: file://../assertions.py:e2e_category
+      metric: category
+    - type: python
+      value: file://../assertions.py:e2e_match
+      metric: match
+    - type: python
+      value: file://../assertions.py:e2e_action
+      metric: action
+    - type: python
+      value: file://../assertions.py:e2e_safety
+      metric: safety

@@ -151,3 +151,51 @@ class PendingApprovals:
     def remove(self, thread_id: str) -> None:
         self._conn.execute("DELETE FROM pending_approvals WHERE thread_id = ?", (thread_id,))
         self._conn.commit()
+
+
+def _read_only(path: str | Path) -> sqlite3.Connection | None:
+    if not Path(path).exists():
+        return None
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def read_decisions(path: str | Path, since: str | None = None) -> list[dict[str, Any]]:
+    """Decision rows logged at or after ``since`` (ISO), read-only; [] when there is no log.
+
+    Columns an older table lacks read as None.
+    """
+    conn = _read_only(path)
+    if conn is None:
+        return []
+    try:
+        present = _columns(conn, "decisions")
+        if not present:
+            return []
+        select = ", ".join(c if c in present else f"NULL AS {c}" for c in DECISION_COLUMNS)
+        query = f"SELECT {select}, timestamp FROM decisions"  # noqa: S608
+        params: tuple[str, ...] = ()
+        if since is not None:
+            query += " WHERE timestamp >= ?"
+            params = (since,)
+        return [dict(row) for row in conn.execute(query, params)]
+    finally:
+        conn.close()
+
+
+def count_pending(path: str | Path) -> int:
+    """Approvals still waiting in ``triage review``, read-only."""
+    conn = _read_only(path)
+    if conn is None:
+        return 0
+    try:
+        if not _columns(conn, "pending_approvals"):
+            return 0
+        return int(conn.execute("SELECT COUNT(*) FROM pending_approvals").fetchone()[0])
+    finally:
+        conn.close()

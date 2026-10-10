@@ -2,31 +2,32 @@ from __future__ import annotations
 
 import json
 
-from evals.assertions import _compare, get_assert, match_assert
+from evals.assertions import get_assert, match_assert
+from evals.scoring import field_ok
 
 
 def test_company_normalization() -> None:
-    assert _compare("company", "Acme Corp.", "acme corp")
-    assert not _compare("company", "Acme", "Globex")
+    assert field_ok("company", "Acme Corp.", "acme corp")
+    assert not field_ok("company", "Acme", "Globex")
 
 
 def test_timezone_normalization() -> None:
-    assert _compare("timezone", "PST", "America/Los_Angeles")
-    assert _compare("timezone", "GMT", "Etc/UTC")
+    assert field_ok("timezone", "PST", "America/Los_Angeles")
+    assert field_ok("timezone", "GMT", "Etc/UTC")
 
 
-def test_date_part_compare() -> None:
-    assert _compare("date_time", "on 2026-10-21 at 10:00", "2026-10-21T10:00")
-    assert not _compare("date_time", "2026-10-22", "2026-10-21")
+def test_date_partfield_ok() -> None:
+    assert field_ok("date_time", "on 2026-10-21 at 10:00", "2026-10-21T10:00")
+    assert not field_ok("date_time", "2026-10-22", "2026-10-21")
 
 
 def test_date_time_compares_time() -> None:
-    assert not _compare("date_time", "on 2026-10-21 at 22:00", "2026-10-21T10:00")
+    assert not field_ok("date_time", "on 2026-10-21 at 22:00", "2026-10-21T10:00")
 
 
 def test_absent_field_not_hallucinated() -> None:
-    assert not _compare("company", "TBD", None)
-    assert _compare("company", None, None)
+    assert not field_ok("company", "TBD", None)
+    assert field_ok("company", None, None)
 
 
 def test_get_assert_passes() -> None:

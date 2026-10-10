@@ -9,11 +9,12 @@ from __future__ import annotations
 import argparse
 import json
 import math
+from datetime import date
 from pathlib import Path
 from typing import Any
 
 from evals import scoring
-from triage.config import MIN_GUARD_THRESHOLD
+from triage.config import MIN_GUARD_THRESHOLD, load
 from triage.guard import Action
 
 
@@ -47,6 +48,22 @@ def ece(probs: list[dict[str, float]], labels: list[str], n_bins: int = 10) -> f
     for i in range(n_bins):
         if bin_cnt[i] > 0:
             total += (bin_cnt[i] / n) * abs(bin_conf[i] / bin_cnt[i] - bin_acc[i] / bin_cnt[i])
+    return total
+
+
+def top_label_ece(confidences: list[float], correct: list[bool], n_bins: int = 10) -> float:
+    """ECE for a single chosen answer: confidence in it against whether it was right."""
+    n = len(confidences)
+    if n == 0:
+        return 0.0
+    total = 0.0
+    for i in range(n_bins):
+        lo, hi = i / n_bins, (i + 1) / n_bins
+        idx = [j for j, c in enumerate(confidences) if lo < c <= hi or (i == 0 and c == 0.0)]
+        if idx:
+            conf = sum(confidences[j] for j in idx) / len(idx)
+            acc = sum(correct[j] for j in idx) / len(idx)
+            total += len(idx) / n * abs(conf - acc)
     return total
 
 
@@ -138,10 +155,13 @@ def round_up(value: float, places: int = 3) -> float:
     return math.ceil(round(value * scale, 6)) / scale
 
 
-def guard_rows(path: str | Path) -> dict[str, list[tuple[float, float, bool]]]:
-    """Per-provider rows for ``recommend_guard_thresholds`` from an e2e results file."""
+DatedRow = tuple[float, float, bool, str]
+
+
+def guard_rows(path: str | Path) -> dict[str, list[DatedRow]]:
+    """Per-provider (category_prob, match_prob, correct, date) from an e2e results file."""
     data = json.loads(Path(path).read_text())
-    by_provider: dict[str, list[tuple[float, float, bool]]] = {}
+    by_provider: dict[str, list[DatedRow]] = {}
     for result in data["results"]["results"]:
         output = (result.get("response") or {}).get("output")
         if not isinstance(output, str) or '"guard_decision"' not in output:
@@ -151,10 +171,53 @@ def guard_rows(path: str | Path) -> dict[str, list[tuple[float, float, bool]]]:
             continue
         provider = scoring.provider_id(result)
         correct = scoring.applied_ok(Action.TRACKER_REJECTED, out, result.get("vars") or {})
+        date = str((result.get("vars") or {}).get("date") or "")
         by_provider.setdefault(provider, []).append(
-            (float(out["category_prob"]), float(out["match_prob"]), correct)
+            (float(out["category_prob"]), float(out["match_prob"]), correct, date)
         )
     return by_provider
+
+
+def _scored(rows: list[DatedRow], cat: float, match: float) -> str:
+    admitted = [r for r in rows if r[0] >= cat and r[1] >= match]
+    errors = sum(1 for r in admitted if not r[2])
+    bound = scoring.wilson_upper(errors, len(admitted))
+    return f"admitted={len(admitted)} wrong={errors} error_upper95={bound:.3f}"
+
+
+def out_of_sample(
+    rows: list[DatedRow],
+    split_date: str,
+    target_failure: float,
+    deployed: tuple[float, float] = (0.99, 0.99),
+) -> list[str]:
+    """Pick thresholds on mail before ``split_date`` and score them on mail from it onward.
+
+    Thresholds chosen and scored on the same rows meet the target by construction; the
+    out-of-sample line is the number to report. The test split is also scored at the
+    ``deployed`` thresholds, which were not fitted to it.
+    """
+    dated = [r for r in rows if r[3]]
+    train = [r[:3] for r in dated if r[3] < split_date]
+    test = [r for r in dated if r[3] >= split_date]
+    lines = [
+        f"calibration rows before {split_date}: {len(train)}; test rows: {len(test)}; "
+        f"undated rows left out: {len(rows) - len(dated)}",
+        f"test at deployed {deployed[0]}/{deployed[1]}: {_scored(test, *deployed)}",
+    ]
+    found = recommend_guard_thresholds(train, target_failure)
+    if found is None:
+        return [*lines, "insufficient calibration evidence; keep 0.99"]
+    cat, match = (max(t, MIN_GUARD_THRESHOLD) for t in found[:2])
+    return [
+        *lines,
+        *guard_lines(train, target_failure),
+        f"out-of-sample at recommended thresholds: {_scored(test, cat, match)}",
+    ]
+
+
+def _iso_date(value: str) -> str:
+    return date.fromisoformat(value).isoformat()
 
 
 def guard_lines(rows: list[tuple[float, float, bool]], target_failure: float) -> list[str]:
@@ -202,7 +265,12 @@ def load_promptfoo_results(path: str | Path) -> dict[str, dict[str, list[Any]]]:
     return by_provider
 
 
-def main(results_path: str, out_path: str | None = None, target_failure: float = 0.05) -> str:
+def main(
+    results_path: str,
+    out_path: str | None = None,
+    target_failure: float = 0.05,
+    split_date: str | None = None,
+) -> str:
     by_provider = load_promptfoo_results(results_path)
     lines: list[str] = []
     for provider, data in sorted(by_provider.items()):
@@ -222,7 +290,12 @@ def main(results_path: str, out_path: str | None = None, target_failure: float =
         if provider == "rules":
             continue  # its probabilities are keyword counts
         lines.append(f"== guard thresholds / {provider} (rejections proposed={len(rows)}) ==")
-        lines.extend(guard_lines(rows, target_failure))
+        if split_date:
+            cfg = load()
+            deployed = (cfg.guard_category_threshold, cfg.guard_match_threshold)
+            lines.extend(out_of_sample(rows, split_date, target_failure, deployed))
+        else:
+            lines.extend(guard_lines([r[:3] for r in rows], target_failure))
         lines.append("")
     report = "\n".join(lines)
     print(report)
@@ -236,5 +309,8 @@ if __name__ == "__main__":
     parser.add_argument("results", help="promptfoo results JSON (classify or e2e)")
     parser.add_argument("out", nargs="?", help="write the report here too")
     parser.add_argument("--target", type=float, default=0.05, help="silent failure target")
+    parser.add_argument(
+        "--split-date", type=_iso_date, help="YYYY-MM-DD: calibrate on earlier mail, score the rest"
+    )
     args = parser.parse_args()
-    main(args.results, args.out, args.target)
+    main(args.results, args.out, args.target, args.split_date)

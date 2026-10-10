@@ -1,7 +1,4 @@
-"""Metrics per provider from a promptfoo results file, optionally gated on recorded thresholds.
-
-python -m evals.report RESULTS --suite e2e|redteam [--check THRESHOLDS --provider NAME]
-"""
+"""Metrics per provider from a promptfoo results file, optionally gated on recorded thresholds."""
 
 from __future__ import annotations
 
@@ -42,19 +39,89 @@ def _share(count: int, n: int) -> float:
     return count / n if n else 0.0
 
 
+def _mean(values: list[float]) -> float:
+    return sum(values) / len(values) if values else 0.0
+
+
+def node_profile(outputs: list[dict[str, Any]]) -> dict[str, dict[str, float]]:
+    """Per graph node: mean and p95 milliseconds, and mean tokens."""
+    per_node: dict[str, list[float]] = {}
+    tokens: dict[str, list[float]] = {}
+    for out in outputs:
+        for node, ms in (out.get("timings_ms") or {}).items():
+            per_node.setdefault(node, []).append(float(ms))
+            tokens.setdefault(node, []).append(float((out.get("node_tokens") or {}).get(node, 0)))
+    return {
+        node: {
+            "mean_ms": round(_mean(ms), 2),
+            "p95_ms": round(_p95(ms), 2),
+            "mean_tokens": round(_mean(tokens[node]), 1),
+        }
+        for node, ms in per_node.items()
+    }
+
+
+def _total(out: dict[str, Any], key: str) -> float:
+    return float(sum(role.get(key, 0) for role in (out.get("tokens") or {}).values()))
+
+
+def token_usage(outputs: list[dict[str, Any]]) -> dict[str, float]:
+    """Mean and p95 tokens and model calls per email."""
+    stats: dict[str, float] = {}
+    for key, name in (("input_tokens", "input"), ("output_tokens", "output"), ("calls", "calls")):
+        values = [_total(out, key) for out in outputs]
+        stats[f"{name}_mean"] = round(_mean(values), 1)
+        stats[f"{name}_p95"] = _p95(values) if values else 0.0
+    return stats
+
+
+def class_f1(pairs: list[tuple[str | None, str]]) -> dict[str, float]:
+    """F1 per labelled category; ``pairs`` are (predicted, expected), None for an error."""
+    scores = {}
+    for label in sorted({expected for _, expected in pairs}):
+        tp = sum(1 for p, e in pairs if p == label and e == label)
+        fp = sum(1 for p, e in pairs if p == label and e != label)
+        fn = sum(1 for p, e in pairs if p != label and e == label)
+        scores[label] = round(2 * tp / (2 * tp + fp + fn), 3) if tp else 0.0
+    return scores
+
+
+def field_accuracy(
+    outputs: list[tuple[dict[str, Any] | None, dict[str, Any]]],
+) -> dict[str, float]:
+    """Share of emails whose extracted field matches the label, per field; an errored
+    email counts as wrong on every field."""
+    per_field: dict[str, list[bool]] = {}
+    for out, vars_ in outputs:
+        expected = vars_.get("extracted") or {}
+        if isinstance(expected, str):
+            expected = json.loads(expected)
+        predicted = (out or {}).get("extracted") or {}
+        for field, value in expected.items():
+            ok = out is not None and scoring.field_ok(field, predicted.get(field), value)
+            per_field.setdefault(field, []).append(ok)
+    return {f: round(_share(sum(ok), len(ok)), 3) for f, ok in sorted(per_field.items())}
+
+
 def e2e_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    scored = [(out, row.get("vars") or {}) for row in rows if (out := _output(row)) is not None]
-    n = len(scored)
+    """Accuracy is over every row, so an errored email counts as wrong."""
+    outputs = [(_output(row), row.get("vars") or {}) for row in rows]
+    scored = [(out, v) for out, v in outputs if out is not None]
+    n = len(rows)
     auto = [(o, v) for o, v in scored if o.get("applied")]
     silent = sum(1 for o, v in auto if scoring.silent_failures(o, v))
-    latencies = [float(row.get("latencyMs") or 0) for row in rows]
+    graph_ms = [sum((o.get("timings_ms") or {}).values()) for o, _ in scored]
+    f1 = class_f1([(o.get("category") if o else None, v.get("category", "")) for o, v in outputs])
     return {
         "n": n,
-        "distinct_bodies": len({v.get("body") for _, v in scored}),
-        "errors": len(rows) - n,
+        "distinct_bodies": len({v.get("body") for _, v in outputs}),
+        "errors": n - len(scored),
         "category_accuracy": _share(sum(scoring.category_ok(o, v) for o, v in scored), n),
+        "macro_f1": round(_mean(list(f1.values())), 3),
+        "class_f1": f1,
         "match_accuracy": _share(sum(scoring.match_ok(o, v) for o, v in scored), n),
         "action_accuracy": _share(sum(scoring.action_ok(o, v) for o, v in scored), n),
+        "field_accuracy": field_accuracy(outputs),
         "approval_rate": _share(sum(o.get("guard_decision") == "approval" for o, _ in scored), n),
         "auto_applied": len(auto),
         "silent_failures": f"{silent}/{len(auto)}",
@@ -64,15 +131,17 @@ def e2e_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "invented_details": sum(
             bool(scoring.invented_details(o.get("draft"), v.get("body", ""))) for o, v in scored
         ),
-        "latency_mean_ms": sum(latencies) / len(latencies) if latencies else 0.0,
-        "latency_p95_ms": _p95(latencies) if latencies else 0.0,
+        "graph_latency_mean_ms": round(_mean(graph_ms), 2),
+        "graph_latency_p95_ms": round(_p95(graph_ms), 2) if graph_ms else 0.0,
+        "tokens_per_email": token_usage([o for o, _ in scored]),
+        "nodes": node_profile([o for o, _ in scored]),
     }
 
 
 def redteam_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
     failures: dict[str, list[str]] = {}
     errors: list[str] = []
-    leaks = hijacked = violations = 0
+    leaks = hijacked = caught = violations = 0
     for row in rows:
         vars_ = row.get("vars") or {}
         name = str((row.get("testCase") or {}).get("description") or vars_.get("email_id"))
@@ -80,10 +149,13 @@ def redteam_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
         if out is None:
             errors.append(name)
             continue
-        if unapproved := scoring.unapproved(out, vars_):
+        unapproved = scoring.unapproved(out, vars_)
+        if unapproved:
             failures[name] = sorted(unapproved)
+        swayed = scoring.hijacked(out, vars_)
         leaks += bool(scoring.leaks(out, vars_))
-        hijacked += scoring.hijacked(out, vars_)
+        hijacked += swayed
+        caught += swayed and not unapproved
         violations += len(scoring.policy_violations(out))
     return {
         "n": len(rows),
@@ -94,6 +166,7 @@ def redteam_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "leaks": leaks,
         "policy_violations": violations,
         "hijacked": hijacked,
+        "hijacked_caught": caught,
     }
 
 

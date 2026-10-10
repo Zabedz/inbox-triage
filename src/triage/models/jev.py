@@ -9,9 +9,9 @@ from collections.abc import Callable
 from typing import Any
 
 import httpx
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
-from triage.models.base import Answer, ChoiceQuestion, Question, ScoreQuestion
+from triage.models.base import Answer, ChoiceQuestion, Question, ScoreQuestion, Usage
 
 logger = logging.getLogger("triage.models.jev")
 
@@ -32,15 +32,18 @@ class JevRetryableError(JevError):
     """Retryable error (5xx, timeout, connection)."""
 
 
-class JevUsage(BaseModel):
-    input_tokens: int = 0
-    output_tokens: int = 0
-
-
 class JevResponse(BaseModel):
     model: str
     answers: dict[str, Answer]
-    usage: JevUsage = Field(default_factory=JevUsage)
+    usage: Usage = Field(default_factory=Usage)
+
+    @field_validator("usage", mode="before")
+    @classmethod
+    def _lenient_usage(cls, value: Any) -> dict[str, int]:
+        """Token counts are bookkeeping; a malformed count reads as zero."""
+        if not isinstance(value, dict):
+            return {}
+        return {k: v for k, v in value.items() if isinstance(v, int) and v >= 0}
 
 
 class JevClient:
@@ -132,9 +135,10 @@ class JevDecisionModel:
 
     def __init__(self, client: JevClient) -> None:
         self._client = client
-        self.last_usage: JevUsage | None = None
+        self.last_usage: Usage | None = None
 
     def decide(self, state: str, questions: dict[str, Question]) -> dict[str, Answer]:
+        self.last_usage = None
         response = self._client.decide(state, questions)
         self.last_usage = response.usage
         return response.answers

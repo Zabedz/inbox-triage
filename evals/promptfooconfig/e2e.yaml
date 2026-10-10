@@ -1,24 +1,25 @@
-description: "e2e: full graph per email, rules baseline vs Jev vs LLM"
+description: "e2e: full graph per email; rules baseline, Jev and LLM, each LLM backend with and without redaction"
 
 prompts:
   - "{{body}}"
 
+# Jordan Lee is the synthetic candidate (evals/datasets/generate.py); list every name form. *-raw skip redaction.
 providers:
   - python:../providers/graph_provider.py:
       id: rules
-      config:
-        task: e2e
-        model: rules
+      config: {task: e2e, model: rules, candidate_names: "Jordan Lee,Jordan"}
   - python:../providers/graph_provider.py:
       id: jev
-      config:
-        task: e2e
-        model: jev
+      config: {task: e2e, model: jev, candidate_names: "Jordan Lee,Jordan"}
+  - python:../providers/graph_provider.py:
+      id: jev-raw
+      config: {task: e2e, model: jev, candidate_names: "Jordan Lee,Jordan", redact: false}
   - python:../providers/graph_provider.py:
       id: llm
-      config:
-        task: e2e
-        model: llm
+      config: {task: e2e, model: llm, candidate_names: "Jordan Lee,Jordan"}
+  - python:../providers/graph_provider.py:
+      id: llm-raw
+      config: {task: e2e, model: llm, candidate_names: "Jordan Lee,Jordan", redact: false}
 
 tests: ../datasets/synthetic.promptfoo.jsonl
 

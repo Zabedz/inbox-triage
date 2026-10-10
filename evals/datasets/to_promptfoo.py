@@ -30,6 +30,7 @@ def convert(src: str | Path, dst: str | Path) -> int:
                             "extracted": record["extracted"],
                             "matched_tracker_id": str(matched) if matched is not None else "none",
                             "action": action or "none",
+                            "date": record.get("date") or "",
                         },
                         "description": record["email_id"],
                     }
