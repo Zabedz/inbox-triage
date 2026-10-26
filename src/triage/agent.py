@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sqlite3
 from collections.abc import Callable, Sequence
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +20,7 @@ from triage.graph.graph import build_graph
 from triage.graph.nodes.match import build_match
 from triage.graph.nodes.propose_action import build_propose_action
 from triage.graph.state import State
-from triage.guard import Action, GuardError, GuardThresholds
+from triage.guard import ACTION_STATUS, Action, GuardError, GuardThresholds, status_action
 from triage.models import build_decision_model
 from triage.models.base import DecisionModel, GenerativeModel
 from triage.models.jev import JevAPIError, JevError
@@ -27,14 +28,10 @@ from triage.models.llm import GenerativeAPIError, GenerativeError, build_generat
 from triage.storage import DecisionLog
 from triage.tracker.db import TrackerDB
 from triage.tracker.update import set_status
+from triage.tracker.writeback import TrackerWriteError, write_status
 
 ApplySink = Callable[[Action, State], None]
-
-ACTION_STATUS = {
-    Action.TRACKER_REJECTED: "Rejected",
-    Action.TRACKER_INTERVIEW: "Interview",
-    Action.TRACKER_OFFER: "Offer",
-}
+StatusWriter = Callable[[int, str, date | None], object]
 
 LABEL_ACTIONS = {Action.LABEL, Action.ACK}
 
@@ -46,6 +43,7 @@ EMAIL_ERRORS: tuple[type[Exception], ...] = (
     HttpError,
     httpx.HTTPError,
     sqlite3.OperationalError,
+    TrackerWriteError,
 )
 
 # Auth and rate-limit rejections hit every email alike.
@@ -59,21 +57,33 @@ def is_transient(exc: Exception) -> bool:
         return status >= 500 or status in SYSTEMIC_STATUSES
     if isinstance(exc, (JevAPIError, GenerativeAPIError)):
         return exc.status in SYSTEMIC_STATUSES
+    if isinstance(exc, TrackerWriteError):
+        return exc.retryable
     return not isinstance(exc, GuardError)
 
 
-def has_effect(action: Action, matched_id: int | None) -> bool:
-    """Whether applying ``action`` changes anything yet (calendar and drafts are log-only)."""
-    return action in LABEL_ACTIONS or (action in ACTION_STATUS and matched_id is not None)
+def has_effect(action: Action, matched_id: int | None, category: str | None = None) -> bool:
+    """Whether applying ``action`` changes anything yet (drafts stay log-only)."""
+    resolved = status_action(action, category)
+    return action in LABEL_ACTIONS or (resolved in ACTION_STATUS and matched_id is not None)
 
 
-def make_apply_sink(label: Callable[[str], None], tracker_db: Path) -> ApplySink:
+def make_apply_sink(
+    label: Callable[[str], None], tracker_db: Path, write: StatusWriter | None = None
+) -> ApplySink:
+    """Label in Gmail and set tracker status; ``write`` updates the source tracker first."""
+
     def apply_sink(action: Action, state: State) -> None:
         if action in LABEL_ACTIONS:
             label(state.get("email_id", ""))
         matched_id = state.get("matched_id")
-        if action in ACTION_STATUS and matched_id is not None:
-            set_status(tracker_db, matched_id, ACTION_STATUS[action])
+        resolved = status_action(action, state.get("category"))
+        if resolved in ACTION_STATUS and matched_id is not None:
+            if write is not None:
+                email = state.get("email")
+                received = email.date.date() if email is not None and email.date else None
+                write(matched_id, ACTION_STATUS[resolved], received)
+            set_status(tracker_db, matched_id, ACTION_STATUS[resolved])
 
     return apply_sink
 
@@ -120,7 +130,13 @@ def production_graph(
         thresholds=GuardThresholds(
             category=cfg.guard_category_threshold, match=cfg.guard_match_threshold
         ),
-        apply_sink=make_apply_sink(lambda mid: apply_label(gmail_service, mid), cfg.tracker.db),
+        apply_sink=make_apply_sink(
+            lambda mid: apply_label(gmail_service, mid),
+            cfg.tracker.db,
+            lambda row, status, on: write_status(
+                cfg.tracker.node, cfg.tracker.set_status, row, status, on
+            ),
+        ),
         log_sink=decision_log.log,
         checkpointer=checkpointer,
         redact_names=cfg.candidate_names,

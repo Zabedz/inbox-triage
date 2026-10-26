@@ -188,7 +188,10 @@ class ZenGenerativeModel:
         body = {
             "model": self._model,
             "messages": user,
-            "response_format": {"type": "json_object"},
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {"name": schema.__name__, "schema": schema.model_json_schema()},
+            },
         }
         headers = {
             "Authorization": f"Bearer {self._api_key}",

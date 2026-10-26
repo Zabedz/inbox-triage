@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -43,6 +44,9 @@ class TrackerConfig:
     data_dir: Path
     snapshot_md: Path
     db: Path
+    # career-ops CLI that writes status changes to the source tracker.
+    set_status: Path = Path("set-status.mjs")
+    node: str = "node"
 
 
 @dataclass(frozen=True)
@@ -98,8 +102,9 @@ def load(env_path: str | Path | None = None) -> Config:
         model=os.environ.get("JEV_MODEL", DEFAULT_JEV_MODEL),
     )
 
+    applications = _path("TRACKER_APPLICATIONS", DEFAULT_TRACKER_APPLICATIONS)
     tracker = TrackerConfig(
-        source_applications=_path("TRACKER_APPLICATIONS", DEFAULT_TRACKER_APPLICATIONS),
+        source_applications=applications,
         source_status_log=_path("TRACKER_STATUS_LOG", DEFAULT_TRACKER_STATUS_LOG),
         source_active_interviews=_path(
             "TRACKER_ACTIVE_INTERVIEWS", DEFAULT_TRACKER_ACTIVE_INTERVIEWS
@@ -107,6 +112,8 @@ def load(env_path: str | Path | None = None) -> Config:
         data_dir=data_dir,
         snapshot_md=data_dir / "applications.snapshot.md",
         db=data_dir / "tracker.db",
+        set_status=_path("TRACKER_SET_STATUS", str(applications.parent.parent / "set-status.mjs")),
+        node=os.environ.get("NODE_BIN") or shutil.which("node") or "node",
     )
 
     gmail = GmailConfig(

@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import fcntl
 import sqlite3
+from datetime import UTC, date, datetime
 
 import pytest
-from conftest import FakeClient, make_cfg
+from conftest import FakeClient, make_cfg, make_email
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 from triage.agent import make_apply_sink
@@ -15,6 +16,7 @@ from triage.models.jev import JevAPIError
 from triage.models.llm import GenerativeRetryableError
 from triage.run import LOCK_FILE, run
 from triage.storage import MAX_ATTEMPTS, DecisionLog, PendingApprovals
+from triage.tracker.writeback import TrackerWriteError
 
 
 def recording_sink(applied: list):
@@ -176,6 +178,21 @@ def test_apply_sink_labels_and_updates_tracker(tmp_path, tracker_db) -> None:
     assert statuses[1] == "Applied"
 
 
+def test_apply_sink_calendar_event_marks_interview_for_invite(tmp_path, tracker_db) -> None:
+    tracker_db.close()
+    cfg = make_cfg(tmp_path)
+    sink = make_apply_sink(lambda mid: None, cfg.tracker.db)
+
+    sink(Action.CALENDAR_EVENT, {"email_id": "m1", "matched_id": 4, "category": "interview_invite"})
+    sink(Action.CALENDAR_EVENT, {"email_id": "m2", "matched_id": 1, "category": "assessment"})
+
+    conn = sqlite3.connect(cfg.tracker.db)
+    statuses = dict(conn.execute("SELECT id, status FROM applications").fetchall())
+    conn.close()
+    assert statuses[4] == "Interview"
+    assert statuses[1] == "Applied"
+
+
 class FakeGmail:
     def __init__(self) -> None:
         self.modified: list[tuple[str, dict]] = []
@@ -209,3 +226,33 @@ def test_apply_label_adds_existing_label() -> None:
     gmail = FakeGmail()
     apply_label(gmail, "m1")
     assert gmail.modified == [("m1", {"addLabelIds": ["L1"]})]
+
+
+def test_apply_sink_writes_source_tracker_before_local_copy(tmp_path, tracker_db) -> None:
+    tracker_db.close()
+    cfg = make_cfg(tmp_path)
+    written: list[tuple] = []
+    email = make_email("m3").model_copy(update={"date": datetime(2026, 10, 9, 15, 0, tzinfo=UTC)})
+    sink = make_apply_sink(lambda mid: None, cfg.tracker.db, lambda *args: written.append(args))
+
+    sink(Action.TRACKER_REJECTED, {"email_id": "m3", "email": email, "matched_id": 4})
+    sink(Action.ACK, {"email_id": "m4", "matched_id": 4})
+
+    assert written == [(4, "Rejected", date(2026, 10, 9))]
+
+
+def test_failed_source_write_leaves_local_copy_unchanged(tmp_path, tracker_db) -> None:
+    tracker_db.close()
+    cfg = make_cfg(tmp_path)
+
+    def busy(*args):
+        raise TrackerWriteError("lock held", retryable=True)
+
+    sink = make_apply_sink(lambda mid: None, cfg.tracker.db, busy)
+    with pytest.raises(TrackerWriteError):
+        sink(Action.TRACKER_REJECTED, {"email_id": "m3", "matched_id": 4})
+
+    conn = sqlite3.connect(cfg.tracker.db)
+    status = conn.execute("SELECT status FROM applications WHERE id = 4").fetchone()[0]
+    conn.close()
+    assert status != "Rejected"

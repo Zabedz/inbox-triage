@@ -57,8 +57,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
 def _cmd_review(args: argparse.Namespace) -> int:
     cfg = load()
-    handled = review(cfg)
-    print(f"reviewed {handled} approvals")
+    review(cfg)
     return 0
 
 

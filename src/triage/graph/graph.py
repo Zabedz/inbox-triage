@@ -13,7 +13,15 @@ from langgraph.types import RetryPolicy, interrupt
 from triage.graph.nodes.classify import build_classify
 from triage.graph.nodes.extract import build_extract
 from triage.graph.state import State
-from triage.guard import Action, GuardError, GuardThresholds, check_allowed, decide
+from triage.guard import (
+    Action,
+    GuardError,
+    GuardThresholds,
+    check_allowed,
+    decide,
+    out_of_scope,
+    status_prob,
+)
 from triage.models.base import DecisionModel, GenerativeModel
 from triage.redact import redact as redact_text
 
@@ -73,8 +81,17 @@ def _action(value: str) -> Action:
 
 
 def guard(state: State, thresholds: GuardThresholds) -> dict[str, Any]:
+    probs = state.get("category_probs", {})
+    if out_of_scope(state.get("category"), probs):
+        return {"guard_decision": "skip", "reason": "not an update to a tracked application"}
     action = state.get("action")
     if action is None:
+        doubt = status_prob(probs)
+        if doubt:
+            return {
+                "guard_decision": "approval",
+                "reason": f"possible application update ({doubt:.0%} status categories)",
+            }
         return {"guard_decision": "approval", "reason": "no action proposed"}
     resolved = _action(action)
     row = _matched_candidate(state)
@@ -87,6 +104,7 @@ def guard(state: State, thresholds: GuardThresholds) -> dict[str, Any]:
         thresholds=thresholds,
         sender_domain=state.get("sender_domain", ""),
         row_names=[n for n in (row.get("company"), row.get("via")) if n] if row else [],
+        row_status=row.get("status") if row else None,
     )
     return {"guard_decision": decision.route, "reason": decision.reason}
 
@@ -133,6 +151,15 @@ def approval(state: State) -> dict[str, Any]:
         logger.warning("refused reviewed action for %s: %s", state.get("email_id"), exc)
         return {"reviewed_action": None, "verdict": f"refused {value!r}"}
     return {"reviewed_action": action.value, "verdict": verdict}
+
+
+def _route_after_classify(state: State) -> str:
+    # Out-of-scope mail skips the model calls of extract, match and propose_action.
+    return (
+        "guard"
+        if out_of_scope(state.get("category"), state.get("category_probs", {}))
+        else "extract"
+    )
 
 
 def _route_after_guard(state: State) -> str:
@@ -235,12 +262,14 @@ def build_graph(
     graph.add_edge(START, "fetch_context")
     graph.add_edge("fetch_context", "redact")
     graph.add_edge("redact", "classify")
-    graph.add_edge("classify", "extract")
+    graph.add_conditional_edges(
+        "classify", _route_after_classify, {"guard": "guard", "extract": "extract"}
+    )
     graph.add_edge("extract", "match")
     graph.add_edge("match", "propose_action")
     graph.add_edge("propose_action", "guard")
     graph.add_conditional_edges(
-        "guard", _route_after_guard, {"auto": "apply", "approval": "approval"}
+        "guard", _route_after_guard, {"auto": "apply", "approval": "approval", "skip": "log"}
     )
     graph.add_edge("apply", "log")
     graph.add_conditional_edges(

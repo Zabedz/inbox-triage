@@ -37,18 +37,23 @@ def build_service(cfg: Config, interactive: bool = True) -> object:
     `cfg.gmail.token_path`. A token missing a configured scope is re-authorised, or
     raises `GmailAuthError` when ``interactive`` is False.
     """
+    from google.auth.exceptions import RefreshError
     from google.auth.transport.requests import Request
     from google_auth_oauthlib.flow import InstalledAppFlow
     from googleapiclient.discovery import build
 
     token_path: Path = cfg.gmail.token_path
     creds = load_token(token_path, cfg.gmail.scopes)
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
+    if creds and not creds.valid and creds.expired and creds.refresh_token:
+        try:
             creds.refresh(Request())
-        elif not interactive:
+        except RefreshError:
+            creds = None
+    if not creds or not creds.valid:
+        if not interactive:
             raise GmailAuthError(
-                f"token at {token_path} is missing or lacks {cfg.gmail.scopes}; run triage auth"
+                f"token at {token_path} is missing, lacks {cfg.gmail.scopes}, "
+                "or could not be refreshed; run triage auth"
             )
         else:
             secrets = cfg.tracker.data_dir / CLIENT_SECRETS

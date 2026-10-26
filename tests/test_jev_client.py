@@ -124,9 +124,10 @@ def test_serializes_score_question() -> None:
                 "answers": {
                     "urgency": {
                         "type": "score",
-                        "score": "high",
-                        "confidence": 0.9,
-                        "probabilities": {"high": 0.9, "low": 0.1},
+                        "score": 0.97,
+                        "confidence": 0.94,
+                        "legend": {"0": "low", "1": "high"},
+                        "probabilities": {"0": 0.03, "1": 0.97},
                     }
                 },
                 "usage": {"input_tokens": 1, "output_tokens": 1},
@@ -137,6 +138,7 @@ def test_serializes_score_question() -> None:
     client = _client(httpx.MockTransport(handler))
     resp = client.decide("state", {"urgency": score("How urgent?", ["low", "high"])})
     assert resp.answers["urgency"].score == "high"
+    assert resp.answers["urgency"].probabilities == {"low": 0.03, "high": 0.97}
     assert seen[0]["questions"]["urgency"] == {
         "type": "score",
         "instructions": "How urgent?",
@@ -150,3 +152,34 @@ def test_malformed_usage_reads_as_zero(usage) -> None:
 
     response = JevResponse.model_validate({"model": "jev-1.13", "answers": {}, "usage": usage})
     assert response.usage.input_tokens == 0
+
+
+def _score_body(probabilities: dict[str, float], legend: dict[str, str]) -> dict:
+    return {
+        "model": "jev-1.13",
+        "answers": {
+            "urgency": {
+                "type": "score",
+                "score": 0.9,
+                "confidence": 0.5,
+                "legend": legend,
+                "probabilities": probabilities,
+            }
+        },
+    }
+
+
+def test_score_selects_most_likely_level_over_expected_index() -> None:
+    legend = {"0": "low", "1": "medium", "2": "high"}
+    body = _score_body({"0": 0.55, "1": 0.0, "2": 0.45}, legend)
+    client = _client(mock_transport(response(200, body)))
+    answer = client.decide("state", {"urgency": score("How urgent?", list(legend.values()))})
+    assert answer.answers["urgency"].score == "low"
+    assert answer.answers["urgency"].confidence == 0.55
+
+
+def test_score_index_missing_from_legend_raises_api_error() -> None:
+    body = _score_body({"0": 0.5, "3": 0.5}, {"0": "low", "1": "high"})
+    client = _client(mock_transport(response(200, body)))
+    with pytest.raises(JevAPIError):
+        client.decide("state", {"urgency": score("How urgent?", ["low", "high"])})

@@ -39,6 +39,52 @@ AUTO_ACTIONS: set[Action] = {Action.LABEL, Action.ACK}
 # Actions applied automatically only when probabilities clear configured thresholds.
 THRESHOLD_GATED_AUTO: set[Action] = {Action.TRACKER_REJECTED}
 
+# Tracker status each status action writes.
+ACTION_STATUS: dict[Action, str] = {
+    Action.TRACKER_REJECTED: "Rejected",
+    Action.TRACKER_INTERVIEW: "Interview",
+    Action.TRACKER_OFFER: "Offer",
+}
+
+# Categories where a calendar event is itself an interview, so it also marks the tracker.
+# Excludes "assessment": that calendar event is an online test, not an interview.
+CALENDAR_MEANS_INTERVIEW: set[str] = {"interview_invite"}
+
+
+def status_action(action: Action, category: str | None) -> Action:
+    """The action whose tracker status actually applies.
+
+    A calendar event has no apply path of its own; where it stands in for an interview
+    (``CALENDAR_MEANS_INTERVIEW``), it takes on ``tracker_interview``'s status write.
+    """
+    if action is Action.CALENDAR_EVENT and category in CALENDAR_MEANS_INTERVIEW:
+        return Action.TRACKER_INTERVIEW
+    return action
+
+# Categories that are never an update to a tracked application; logged and skipped.
+OUT_OF_SCOPE: set[str] = {"other", "recruiter_outreach"}
+
+# Categories that change an application's state.
+STATUS_CATEGORIES: set[str] = {
+    "rejection",
+    "interview_invite",
+    "interview_reschedule",
+    "assessment",
+    "offer",
+}
+
+# Out-of-scope mail is skipped only while the status categories together stay below this.
+SKIP_MAX_STATUS_PROB = 0.1
+
+
+def status_prob(category_probs: dict[str, float]) -> float:
+    return sum(p for c, p in category_probs.items() if c in STATUS_CATEGORIES)
+
+
+def out_of_scope(category: str | None, category_probs: dict[str, float]) -> bool:
+    """Whether to skip the email: not an application update, with no real doubt about it."""
+    return category in OUT_OF_SCOPE and status_prob(category_probs) < SKIP_MAX_STATUS_PROB
+
 
 ACTION_DESCRIPTIONS: dict[Action, str] = {
     Action.LABEL: "Label the email in Gmail only",
@@ -58,7 +104,7 @@ class GuardThresholds(BaseModel):
 
 
 class GuardDecision(BaseModel):
-    route: Literal["auto", "approval"]
+    route: Literal["auto", "approval", "skip"]
     reason: str
 
 
@@ -132,10 +178,15 @@ def decide(
     thresholds: GuardThresholds,
     sender_domain: str = "",
     row_names: Sequence[str] = (),
+    row_status: str | None = None,
 ) -> GuardDecision:
     """Route ``action``; a threshold-gated action also needs the sender to be the matched
-    row's company or agency (``row_names``)."""
+    row's company or agency (``row_names``). A status the row already has is skipped."""
     check_allowed(category, action)
+
+    target = ACTION_STATUS.get(action)
+    if target is not None and matched_id is not None and row_status == target:
+        return GuardDecision(route="skip", reason=f"tracker already says {target}")
 
     if action in THRESHOLD_GATED_AUTO:
         if matched_id is None:
@@ -143,7 +194,7 @@ def decide(
                 route="approval", reason="no matching tracker row; threshold gate not met"
             )
         if not sender_matches(sender_domain, row_names):
-            names = " / ".join(row_names) or "the matched row"
+            names = " / ".join(n for n in row_names if _name_keys(n)) or "the matched row"
             return GuardDecision(
                 route="approval",
                 reason=f"sender domain {sender_domain!r} is not {names}",

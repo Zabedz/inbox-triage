@@ -60,6 +60,7 @@ def _candidate_dict(app: Application) -> dict[str, Any]:
         "date_applied": app.date_applied.isoformat(),
         "via": app.via,
         "requisition_id": app.requisition_id,
+        "status": app.status,
     }
 
 

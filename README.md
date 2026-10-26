@@ -34,8 +34,14 @@ The decision model is Jev, or the LLM with `DECISION_BACKEND=llm`.
 | Tracker status to Rejected | category and match probabilities clear `GUARD_*` thresholds, and the sender domain is the matched row's company or agency |
 | Calendar, other tracker changes, reply drafts | never |
 
-Approved actions are re-checked against the category's allowed set before they apply. Calendar and draft
-actions are only logged for now.
+| Skipped (logged, never queued) | When |
+|---|---|
+| `other` and `recruiter_outreach` mail | rejection, interview, reschedule, assessment and offer together below 10%; extract, match and propose_action do not run |
+| A status the matched row already has | always |
+
+Approved actions are re-checked against the category's allowed set before they apply. Status changes go to
+the source tracker through career-ops `set-status.mjs`, dated by the email, then to `data/tracker.db`;
+`triage run` re-snapshots the source first. Calendar and draft actions are only logged for now.
 
 ## Setup
 
@@ -97,7 +103,7 @@ which assume independent emails, are optimistic.
 
 | Provider | n (distinct) | Errors | Category | Macro F1 | Match | Action | Sent to review | Auto-applied | Silent failures (95% upper) |
 |---|---|---|---|---|---|---|---|---|---|
-| rules | 96 (36) | 0 | 90.6% | 0.916 | 99.0% | 90.6% | 77.1% | 22 | 0/22 (11.0%) |
+| rules | 96 (36) | 0 | 90.6% | 0.916 | 90.6% | 90.6% | 46.9% | 22 | 0/22 (11.0%) |
 | jev | not run | | | | | | | | |
 | jev-raw | not run | | | | | | | | |
 | llm | not run | | | | | | | | |
@@ -107,7 +113,7 @@ which assume independent emails, are optimistic.
 
 | Provider | agency | company | contact | date_time | deadline | requisition_id | role | timezone |
 |---|---|---|---|---|---|---|---|---|
-| rules | 87.5% | 96.9% | 78.1% | 100.0% | 88.5% | 100.0% | 96.9% | 75.0% |
+| rules | 87.5% | 88.5% | 78.1% | 97.9% | 88.5% | 93.8% | 77.1% | 75.0% |
 | jev | not run | | | | | | | |
 | jev-raw | not run | | | | | | | |
 | llm | not run | | | | | | | |

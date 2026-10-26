@@ -18,6 +18,7 @@ from triage.config import Config
 from triage.gmail.client import GmailClient
 from triage.gmail.ingest import build_service
 from triage.storage import DecisionLog, PendingApprovals
+from triage.tracker.snapshot import snapshot
 
 logger = logging.getLogger("triage.run")
 
@@ -57,6 +58,8 @@ def _run(
     pending_store = pending or PendingApprovals(cfg.agent_db)
     log_store = decision_log or open_decision_log(cfg)
     if graph is None or client is None:
+        # Re-read the source tracker so edits made outside the agent are seen.
+        snapshot(cfg)
         service = build_service(cfg, interactive=False)
         client = client or GmailClient(service)
         graph = graph or production_graph(

@@ -132,11 +132,20 @@ def category_ok(out: dict[str, Any], vars_: dict[str, Any]) -> bool:
     return bool(out.get("category") == vars_.get("category"))
 
 
+def skipped_correctly(out: dict[str, Any], vars_: dict[str, Any]) -> bool:
+    """Out-of-scope mail, correctly classified, is skipped before match and action run."""
+    return category_ok(out, vars_) and out.get("guard_decision") == "skip"
+
+
 def match_ok(out: dict[str, Any], vars_: dict[str, Any]) -> bool:
+    if skipped_correctly(out, vars_):
+        return True
     return bool(out.get("matched_id") == expected_match(vars_))
 
 
 def action_ok(out: dict[str, Any], vars_: dict[str, Any]) -> bool:
+    if skipped_correctly(out, vars_):
+        return True
     return out.get("action") in acceptable_actions(vars_)
 
 

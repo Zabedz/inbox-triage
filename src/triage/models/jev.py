@@ -37,6 +37,14 @@ class JevResponse(BaseModel):
     answers: dict[str, Answer]
     usage: Usage = Field(default_factory=Usage)
 
+    @field_validator("answers", mode="before")
+    @classmethod
+    def _score_levels(cls, value: Any) -> Any:
+        """Score answers arrive keyed by level index; map them to level names via ``legend``."""
+        if not isinstance(value, dict):
+            return value
+        return {qid: _named_levels(answer) for qid, answer in value.items()}
+
     @field_validator("usage", mode="before")
     @classmethod
     def _lenient_usage(cls, value: Any) -> dict[str, int]:
@@ -142,6 +150,21 @@ class JevDecisionModel:
         response = self._client.decide(state, questions)
         self.last_usage = response.usage
         return response.answers
+
+
+def _named_levels(answer: Any) -> Any:
+    if not isinstance(answer, dict) or answer.get("type") != "score":
+        return answer
+    legend = answer.get("legend")
+    probs = answer.get("probabilities")
+    if not isinstance(legend, dict) or not isinstance(probs, dict) or not probs:
+        return answer
+    try:
+        named = {legend[index]: p for index, p in probs.items()}
+    except (KeyError, TypeError) as exc:
+        raise ValueError(f"score probabilities {probs!r} do not match legend {legend!r}") from exc
+    # Jev's numeric score is the expected index; the selected level is the most likely one.
+    return {**answer, "score": max(named, key=named.__getitem__), "probabilities": named}
 
 
 def _serialize(question: Question) -> dict[str, Any]:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import httpx
@@ -81,6 +82,24 @@ def test_zen_parses_json_object() -> None:
     result = client.generate([{"role": "user", "content": "hi"}], Simple)
     assert result == Simple(category="offer", score=1.0)
     assert client.last_usage == Usage(input_tokens=80, output_tokens=12)
+
+
+def test_zen_sends_answer_schema() -> None:
+    seen: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(json.loads(request.content))
+        content = '{"category": "offer", "score": 1.0}'
+        return httpx.Response(200, json={"choices": [{"message": {"content": content}}]})
+
+    client = ZenGenerativeModel(
+        "key", "m", "https://example.com", transport=httpx.MockTransport(handler)
+    )
+    client.generate([{"role": "user", "content": "hi"}], Simple)
+    assert seen[0]["response_format"] == {
+        "type": "json_schema",
+        "json_schema": {"name": "Simple", "schema": Simple.model_json_schema()},
+    }
 
 
 def test_build_generative_model_unknown_provider() -> None:

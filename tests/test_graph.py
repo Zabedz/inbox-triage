@@ -127,3 +127,69 @@ def test_checkpointer_persists_across_restart(tmp_path: pytest.TempPathFactory) 
     )
     conn2.close()
     assert resumed["trail"][-1]["guard_decision"] == "approval"
+
+
+@pytest.mark.parametrize("category", ["other", "recruiter_outreach"])
+def test_out_of_scope_mail_skips_model_calls(category: str) -> None:
+    called: list[str] = []
+
+    def classify(state):
+        return {"category": category, "category_probs": {category: 0.9}}
+
+    def node(name):
+        def run(state):
+            called.append(name)
+            return {}
+
+        return run
+
+    graph = build_graph(
+        nodes={"classify": classify, **{n: node(n) for n in ("extract", "match", "propose_action")}},
+        apply_sink=lambda action, state: called.append("apply"),
+    )
+    result = graph.invoke({"email_id": "e1", "email": _email()})
+
+    assert called == []
+    assert result["guard_decision"] == "skip"
+    assert result["trail"][-1]["guard_decision"] == "skip"
+
+
+def test_status_the_row_already_has_is_skipped() -> None:
+    applied: list[str] = []
+
+    def classify(state):
+        return {"category": "rejection", "category_probs": {"rejection": 0.5}}
+
+    def match(state):
+        candidates = [{"id": 12, "company": "Acme", "status": "Rejected"}]
+        return {"candidates": candidates, "matched_id": 12, "match_prob": 0.5}
+
+    def propose_action(state):
+        return {"action": "tracker_rejected", "action_prob": 0.9, "draft": None}
+
+    graph = build_graph(
+        nodes={"classify": classify, "match": match, "propose_action": propose_action},
+        apply_sink=lambda action, state: applied.append(action),
+    )
+    result = graph.invoke({"email_id": "e1", "email": _email()})
+
+    assert result["guard_decision"] == "skip"
+    assert result["reason"] == "tracker already says Rejected"
+    assert applied == []
+
+
+def test_out_of_scope_with_status_doubt_goes_to_review() -> None:
+    called: list[str] = []
+
+    def classify(state):
+        return {"category": "other", "category_probs": {"other": 0.75, "rejection": 0.25}}
+
+    def extract(state):
+        called.append("extract")
+        return {"extracted": {}}
+
+    graph = build_graph(nodes={"classify": classify, "extract": extract})
+    result = graph.invoke({"email_id": "e1", "email": _email()})
+
+    assert called == ["extract"]
+    assert result["__interrupt__"][0].value["reason"] == "possible application update (25% status categories)"

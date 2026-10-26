@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from triage.guard import Action, GuardError, GuardThresholds, decide, sender_matches
+from triage.guard import Action, GuardError, GuardThresholds, decide, sender_matches, status_action
 
 T = GuardThresholds(category=0.9, match=0.9)
 
@@ -46,6 +46,14 @@ def test_offer_always_approval() -> None:
 def test_disallowed_action_raises() -> None:
     with pytest.raises(GuardError):
         decide("rejection", 0.99, 12, 0.99, Action.CALENDAR_EVENT, T)
+
+
+def test_calendar_event_resolves_to_interview_for_interview_invite() -> None:
+    assert status_action(Action.CALENDAR_EVENT, "interview_invite") == Action.TRACKER_INTERVIEW
+
+
+def test_calendar_event_stays_itself_for_assessment() -> None:
+    assert status_action(Action.CALENDAR_EVENT, "assessment") == Action.CALENDAR_EVENT
 
 
 def test_unknown_category_raises() -> None:
@@ -110,3 +118,18 @@ def test_rejection_from_other_sender_needs_approval() -> None:
 
 def test_label_ignores_sender() -> None:
     assert decide("rejection", 0.5, None, 0.0, Action.LABEL, T, "anything.example").route == "auto"
+
+
+def test_status_already_set_is_skipped() -> None:
+    d = decide("rejection", 0.5, 4, 0.5, Action.TRACKER_REJECTED, T, "ats.example", ["Acme"], "Rejected")
+    assert (d.route, d.reason) == ("skip", "tracker already says Rejected")
+
+
+def test_different_status_is_not_skipped() -> None:
+    d = decide("rejection", 0.5, 4, 0.5, Action.TRACKER_REJECTED, T, "ats.example", ["Acme"], "Interview")
+    assert d.route == "approval"
+
+
+def test_unmatched_status_action_is_never_skipped() -> None:
+    d = decide("offer", 0.99, None, 0.0, Action.TRACKER_OFFER, T, row_status="Offer")
+    assert d.route == "approval"
