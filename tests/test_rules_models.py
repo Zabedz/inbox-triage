@@ -42,10 +42,13 @@ def test_extract_returns_verbatim_spans() -> None:
     text = "<DATA>\nThe AI Engineer role at Acme Corp (req AC-1001), on 2026-10-21 at 10:00.\n</DATA>"
     result = model.generate([{"role": "user", "content": text}], Extraction)
 
-    assert result.company is not None and result.company.span == "Acme Corp"
-    assert result.role is not None and result.role.span == "AI Engineer"
-    assert result.requisition_id is not None and result.requisition_id.span == "AC-1001"
-    assert result.date_time is not None and result.date_time.span == "2026-10-21 at 10:00"
+    spans = {f.field: f.span for f in result.fields}
+    assert spans == {
+        "company": "Acme Corp",
+        "role": "AI Engineer",
+        "requisition_id": "AC-1001",
+        "date_time": "2026-10-21 at 10:00",
+    }
 
 
 def test_match_loop_searches_once_then_stops() -> None:

@@ -10,7 +10,7 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
-from triage.graph.nodes.extract import ExtractedField, Extraction
+from triage.graph.nodes.extract import ExtractedField, Extraction, FieldName
 from triage.graph.nodes.match import MatchStep
 from triage.graph.nodes.propose_action import Draft
 from triage.labels import DEFAULT_ACTION
@@ -106,10 +106,10 @@ def _data(messages: list[dict[str, str]]) -> str:
     return found.group(1) if found else content
 
 
-def _field(text: str, values: list[str]) -> ExtractedField | None:
+def _field(name: FieldName, text: str, values: list[str]) -> ExtractedField | None:
     for value in sorted(values, key=len, reverse=True):
         if value and value in text:
-            return ExtractedField(value=value, span=value)
+            return ExtractedField(field=name, value=value, span=value)
     return None
 
 
@@ -135,17 +135,18 @@ class RulesGenerativeModel:
     def _extract(self, text: str) -> Extraction:
         req = REQ_ID.search(text)
         when = DATE_TIME.search(text)
-        return Extraction(
-            company=_field(text, self._companies),
-            role=_field(text, self._roles),
-            requisition_id=ExtractedField(value=req.group(), span=req.group()) if req else None,
-            date_time=ExtractedField(value=when.group(), span=when.group()) if when else None,
-        )
+        found = [
+            _field("company", text, self._companies),
+            _field("role", text, self._roles),
+            _field("requisition_id", text, [req.group()] if req else []),
+            _field("date_time", text, [when.group()] if when else []),
+        ]
+        return Extraction(fields=[f for f in found if f is not None])
 
     def _match_step(self, content: str) -> MatchStep:
         if "Tool search_tracker" in content:
             return MatchStep(action="done")
-        company = _field(_data([{"content": content}]), self._companies)
+        company = _field("company", _data([{"content": content}]), self._companies)
         if company is None:
             return MatchStep(action="done")
         return MatchStep(action="search_tracker", company=company.value)

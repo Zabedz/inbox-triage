@@ -50,8 +50,10 @@ class _FakeDecisionModel:
 class _FakeExtractionLLM:
     def generate(self, messages: list[dict[str, str]], schema: Any) -> Any:
         return Extraction(
-            company=ExtractedField(value="Acme Corp", span="Acme Corp"),
-            role=ExtractedField(value="AI Engineer", span="AI Engineer"),
+            fields=[
+                ExtractedField(field="company", value="Acme Corp", span="Acme Corp"),
+                ExtractedField(field="role", value="AI Engineer", span="AI Engineer"),
+            ]
         )
 
 
