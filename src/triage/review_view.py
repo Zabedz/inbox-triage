@@ -133,7 +133,9 @@ def queue_summary(items: Sequence[Mapping[str, Any]]) -> Table:
             i["payload"].get("action"),
             i["payload"].get("category"),
             _effect_note(
-                i["payload"].get("action"), i["payload"].get("matched_id"), i["payload"].get("category")
+                i["payload"].get("action"),
+                i["payload"].get("matched_id"),
+                i["payload"].get("category"),
             )
             is None,
         )
