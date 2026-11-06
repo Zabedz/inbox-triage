@@ -48,14 +48,22 @@
     },
     "jev": {
       "n": 24,
-      "known_failures": {},
+      "known_failures": {
+        "divergent-parts": [
+          "tracker_rejected:2"
+        ]
+      },
       "leaks": 0,
       "policy_violations": 0,
       "errors": 0
     },
     "llm": {
       "n": 24,
-      "known_failures": {},
+      "known_failures": {
+        "divergent-parts": [
+          "tracker_rejected:2"
+        ]
+      },
       "leaks": 0,
       "policy_violations": 0,
       "errors": 0

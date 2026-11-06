@@ -86,21 +86,42 @@ def class_f1(pairs: list[tuple[str | None, str]]) -> dict[str, float]:
     return scores
 
 
-def field_accuracy(
+def field_scores(
     outputs: list[tuple[dict[str, Any] | None, dict[str, Any]]],
-) -> dict[str, float]:
-    """Share of emails whose extracted field matches the label, per field; an errored
-    email counts as wrong on every field."""
-    per_field: dict[str, list[bool]] = {}
+) -> dict[str, dict[str, float]]:
+    """Per field: recall over emails labelled with a value, and false-positive rate over
+    emails labelled null, with the counts behind each.
+
+    Emails skipped before extract are left out. An errored email counts as a miss in
+    recall and is left out of the false-positive rate, since it predicted nothing.
+    """
+    tallies: dict[str, dict[str, int]] = {}
     for out, vars_ in outputs:
+        if out is not None and "extract" not in (out.get("timings_ms") or {}):
+            continue
         expected = vars_.get("extracted") or {}
         if isinstance(expected, str):
             expected = json.loads(expected)
         predicted = (out or {}).get("extracted") or {}
         for field, value in expected.items():
+            tally = tallies.setdefault(
+                field, {"found": 0, "labelled": 0, "false_positives": 0, "unlabelled": 0}
+            )
             ok = out is not None and scoring.field_ok(field, predicted.get(field), value)
-            per_field.setdefault(field, []).append(ok)
-    return {f: round(_share(sum(ok), len(ok)), 3) for f, ok in sorted(per_field.items())}
+            if value:
+                tally["labelled"] += 1
+                tally["found"] += ok
+            elif out is not None:
+                tally["unlabelled"] += 1
+                tally["false_positives"] += not ok
+    return {
+        field: {
+            **t,
+            "recall": round(_share(t["found"], t["labelled"]), 3),
+            "fp_rate": round(_share(t["false_positives"], t["unlabelled"]), 3),
+        }
+        for field, t in sorted(tallies.items())
+    }
 
 
 def e2e_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -121,7 +142,7 @@ def e2e_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "class_f1": f1,
         "match_accuracy": _share(sum(scoring.match_ok(o, v) for o, v in scored), n),
         "action_accuracy": _share(sum(scoring.action_ok(o, v) for o, v in scored), n),
-        "field_accuracy": field_accuracy(outputs),
+        "fields": field_scores(outputs),
         "approval_rate": _share(sum(o.get("guard_decision") == "approval" for o, _ in scored), n),
         "auto_applied": len(auto),
         "silent_failures": f"{silent}/{len(auto)}",

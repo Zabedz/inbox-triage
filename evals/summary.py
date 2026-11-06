@@ -66,9 +66,19 @@ def e2e_table(metrics: dict[str, dict[str, Any]]) -> list[str]:
     return lines
 
 
+def _field_cell(score: dict[str, float] | None) -> str:
+    if score is None:
+        return "0/0 (0/0)"
+    return (
+        f"{score['found']}/{score['labelled']} ({score['false_positives']}/{score['unlabelled']})"
+    )
+
+
 def field_table(metrics: dict[str, dict[str, Any]]) -> list[str]:
-    fields = sorted({f for m in metrics.values() for f in m["field_accuracy"]})
+    fields = sorted({f for m in metrics.values() for f in m["fields"]})
     lines = [
+        "Cells: correct/labelled (false positives/null labels), on emails that reached extract.",
+        "",
         "| Provider | " + " | ".join(fields) + " |",
         "|---|" + "---|" * len(fields),
     ]
@@ -77,7 +87,7 @@ def field_table(metrics: dict[str, dict[str, Any]]) -> list[str]:
         if m is None:
             lines.append(_not_run(provider, len(fields) + 1))
             continue
-        cells = [_pct(m["field_accuracy"].get(f, 0.0)) for f in fields]
+        cells = [_field_cell(m["fields"].get(f)) for f in fields]
         lines.append(f"| {provider} | " + " | ".join(cells) + " |")
     return lines
 

@@ -125,18 +125,75 @@ def test_main_fails_without_thresholds_or_rows(tmp_path, capsys) -> None:
     assert main([empty, "--suite", "e2e", "--check", str(limits), "--provider", "rules"]) == 1
 
 
-def test_field_accuracy_and_graph_latency(tmp_path) -> None:
-    vars_ = {**REJECTION, "extracted": {"company": "Acme Corp", "role": "AI Engineer"}}
-    timed = {"extracted": {"company": "acme corp", "role": None}, "timings_ms": {"a": 10.0, "b": 30.0},
-             "node_tokens": {"a": 0, "b": 120}}
-    metrics = metrics_by_provider(write(tmp_path, [result("jev", out(**timed), vars_)]), "e2e")["jev"]
+def test_graph_latency_and_node_profile(tmp_path) -> None:
+    timed = {"timings_ms": {"a": 10.0, "b": 30.0}, "node_tokens": {"a": 0, "b": 120}}
+    metrics = metrics_by_provider(write(tmp_path, [result("jev", out(**timed), REJECTION)]), "e2e")["jev"]
 
-    assert metrics["field_accuracy"] == {"company": 1.0, "role": 0.0}
     assert metrics["graph_latency_mean_ms"] == 40.0
     assert metrics["nodes"]["b"] == {"mean_ms": 30.0, "p95_ms": 30.0, "mean_tokens": 120.0}
 
 
-def test_errored_email_counts_against_every_field(tmp_path) -> None:
-    vars_ = {**REJECTION, "extracted": {"company": "Acme Corp"}}
-    rows = [result("jev", out(extracted={"company": "Acme Corp"}), vars_), result("jev", None, vars_)]
-    assert metrics_by_provider(write(tmp_path, rows), "e2e")["jev"]["field_accuracy"] == {"company": 0.5}
+def extracted(fields: dict, ran: bool = True) -> dict:
+    return out(extracted=fields, timings_ms={"extract": 5.0} if ran else {"classify": 5.0})
+
+
+def labelled(**fields) -> dict:
+    return {**REJECTION, "extracted": fields}
+
+
+def scores_for(tmp_path, rows) -> dict:
+    return metrics_by_provider(write(tmp_path, rows), "e2e")["jev"]["fields"]
+
+
+def test_recall_counts_only_labelled_emails(tmp_path) -> None:
+    rows = [
+        result("jev", extracted({"agency": "Hays"}), labelled(agency="Hays")),
+        result("jev", extracted({}), labelled(agency="Hays")),
+        result("jev", extracted({}), labelled(agency=None)),
+        result("jev", extracted({}), labelled(agency=None)),
+    ]
+    agency = scores_for(tmp_path, rows)["agency"]
+
+    assert (agency["found"], agency["labelled"], agency["recall"]) == (1, 2, 0.5)
+
+
+def test_false_positives_count_only_null_labels(tmp_path) -> None:
+    rows = [
+        result("jev", extracted({"agency": "Hays"}), labelled(agency=None)),
+        result("jev", extracted({"agency": ""}), labelled(agency=None)),
+        result("jev", extracted({}), labelled(agency=None)),
+        result("jev", extracted({"agency": "Wrong"}), labelled(agency="Hays")),
+    ]
+    agency = scores_for(tmp_path, rows)["agency"]
+
+    assert (agency["false_positives"], agency["unlabelled"]) == (1, 3)
+    assert agency["fp_rate"] == pytest.approx(1 / 3, abs=0.001)
+    assert (agency["found"], agency["labelled"]) == (0, 1)
+
+
+def test_emails_skipped_before_extract_are_left_out(tmp_path) -> None:
+    rows = [
+        result("jev", extracted({"company": "Acme Corp"}), labelled(company="Acme Corp", role=None)),
+        result("jev", extracted({}, ran=False), labelled(company="Acme Corp", role=None)),
+        result("jev", out(extracted={}), labelled(company="Acme Corp", role=None)),
+    ]
+    scores = scores_for(tmp_path, rows)
+
+    assert (scores["company"]["found"], scores["company"]["labelled"]) == (1, 1)
+    assert scores["role"]["unlabelled"] == 1
+
+
+def test_errored_email_counts_in_recall_only(tmp_path) -> None:
+    vars_ = labelled(company="Acme Corp", agency=None)
+    rows = [result("jev", extracted({"company": "Acme Corp"}), vars_), result("jev", None, vars_)]
+    scores = scores_for(tmp_path, rows)
+
+    assert (scores["company"]["found"], scores["company"]["labelled"]) == (1, 2)
+    assert (scores["agency"]["false_positives"], scores["agency"]["unlabelled"]) == (0, 1)
+
+
+def test_labels_given_as_json_string(tmp_path) -> None:
+    vars_ = {**REJECTION, "extracted": json.dumps({"company": "Acme Corp"})}
+    company = scores_for(tmp_path, [result("jev", extracted({"company": "acme corp"}), vars_)])["company"]
+
+    assert company["recall"] == 1.0
