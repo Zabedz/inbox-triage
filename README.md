@@ -116,11 +116,11 @@ Cells: correct/labelled (false positives/null labels), on emails that reached ex
 
 | Provider | agency | company | contact | date_time | deadline | requisition_id | role | timezone |
 |---|---|---|---|---|---|---|---|---|
-| rules | 0/0 (0/67) | 63/65 (1/2) | 0/10 (0/57) | 22/22 (0/45) | 0/10 (0/57) | 52/52 (0/15) | 63/65 (1/2) | 0/22 (0/45) |
-| jev | 1/1 (0/73) | 73/73 (0/1) | 10/10 (18/64) | 24/24 (0/50) | 11/11 (0/63) | 58/58 (0/16) | 73/73 (0/1) | 24/24 (0/50) |
-| jev-raw | 1/1 (0/73) | 72/73 (0/1) | 10/10 (21/64) | 24/24 (0/50) | 11/11 (0/63) | 57/58 (0/16) | 72/73 (0/1) | 24/24 (0/50) |
-| llm | 1/1 (0/76) | 71/73 (0/4) | 10/10 (21/67) | 23/24 (0/53) | 11/11 (0/66) | 58/58 (0/19) | 72/73 (0/4) | 23/24 (0/53) |
-| llm-raw | 1/1 (0/75) | 72/73 (0/3) | 9/10 (20/66) | 22/24 (0/52) | 10/11 (0/65) | 55/58 (0/18) | 69/73 (0/3) | 22/24 (0/52) |
+| rules | 0/0 (0/67) | 63/65 (1/2) | 0/40 (0/27) | 22/22 (0/45) | 0/10 (0/57) | 52/52 (0/15) | 63/65 (1/2) | 0/22 (0/45) |
+| jev | 1/1 (0/73) | 73/73 (0/1) | 28/40 (0/34) | 24/24 (0/50) | 11/11 (0/63) | 58/58 (0/16) | 73/73 (0/1) | 24/24 (0/50) |
+| jev-raw | 1/1 (0/73) | 72/73 (0/1) | 31/40 (0/34) | 24/24 (0/50) | 11/11 (0/63) | 57/58 (0/16) | 72/73 (0/1) | 24/24 (0/50) |
+| llm | 1/1 (0/76) | 71/73 (0/4) | 31/40 (0/37) | 23/24 (0/53) | 11/11 (0/66) | 58/58 (0/19) | 72/73 (0/4) | 23/24 (0/53) |
+| llm-raw | 1/1 (0/75) | 72/73 (0/3) | 29/40 (0/36) | 22/24 (0/52) | 10/11 (0/65) | 55/58 (0/18) | 69/73 (0/3) | 22/24 (0/52) |
 
 ### Red team
 
@@ -163,7 +163,7 @@ stay local, and `eval:real` sends redacted real emails to the configured models.
 - Red-team failures:
   - `divergent-parts` (every provider): the agent reads `text/plain` only, so a plain part saying "rejected" with an HTML part showing an invite auto-rejects the row.
   - `sway-fake-acknowledgement` (rules only): label and acknowledgement actions apply at any confidence, so an invite padded with acknowledgement text is labelled with no review.
-- `contact` is the person or team who wrote the email, so team sign-offs such as "Globex Talent Team" and "HR" are extracted. The synthetic labels leave those null, which accounts for every `contact` false positive above.
+- `contact` is the person or team who wrote the email. Most `contact` misses are one-word team sign-offs: "HR" is found on 1 to 5 of 10 offers, "Scheduling" on 7 to 9 of 10 reschedules.
 - Redaction masks `CANDIDATE_NAMES`, email addresses and phone numbers. Recruiters' and interviewers' names reach the models. Redaction cost is measured on synthetic mail only, since the raw comparison would send unmasked real mail out.
 - The sender check compares domain names without verifying DKIM or DMARC. Genuine rejections sent from an ATS domain go to review.
 - `triage stats` reports routes, review verdicts and agreement. Silent failures in real use need the auto-applied emails labelled by hand (`triage label`), which nothing automates yet.

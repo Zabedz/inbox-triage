@@ -126,18 +126,18 @@ def _rejection(rng: random.Random, i: int) -> LabeledEmail:
         ]
     )
     row = _row(company, role, req)
+    team = f"{company} Talent Team"
     body = (
         f"Dear candidate,\n\nThank you for applying to the {role} role at {company} (req {req}). "
         "After careful consideration, we have decided not to move forward with your "
-        "application at this time. We wish you the best in your search.\n\nRegards,\n"
-        f"{company} Talent Team"
+        f"application at this time. We wish you the best in your search.\n\nRegards,\n{team}"
     )
     return _email(
         "rejection", i, row,
         f"no-reply@{_domain(company)}",
         f"Your application to {company}",
         body,
-        ExtractedFields(company=company, role=role, requisition_id=req),
+        ExtractedFields(company=company, role=role, requisition_id=req, contact=team),
         Action.TRACKER_REJECTED,
     )
 
@@ -180,7 +180,8 @@ def _interview_reschedule(rng: random.Random, i: int) -> LabeledEmail:
         f"Rescheduling your interview - {company}",
         body,
         ExtractedFields(
-            company=company, role=role, date_time="2026-10-15T10:30", timezone="Etc/UTC"
+            company=company, role=role, date_time="2026-10-15T10:30", timezone="Etc/UTC",
+            contact="Scheduling",
         ),
         Action.CALENDAR_CHANGE,
     )
@@ -237,7 +238,7 @@ def _offer(rng: random.Random, i: int) -> LabeledEmail:
         f"hr@{_domain(company)}",
         f"Offer of employment - {company}",
         body,
-        ExtractedFields(company=company, role=role, requisition_id=req),
+        ExtractedFields(company=company, role=role, requisition_id=req, contact="HR"),
         Action.TRACKER_OFFER,
     )
 
